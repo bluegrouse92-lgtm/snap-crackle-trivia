@@ -46,3 +46,4 @@ jobs:
         with:
           name: snap-crackle-trivia-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
