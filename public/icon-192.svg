@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e1145"/>
+      <stop offset="50%" stop-color="#0e0722"/>
+      <stop offset="100%" stop-color="#05020c"/>
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FDE047"/>
+      <stop offset="50%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#D97706"/>
+    </linearGradient>
+    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#C084FC"/>
+      <stop offset="100%" stop-color="#6366F1"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="42" fill="url(#bgGrad)" stroke="rgba(192, 132, 252, 0.3)" stroke-width="3"/>
+  <circle cx="96" cy="96" r="64" fill="url(#purpleGrad)" opacity="0.18"/>
+  <circle cx="96" cy="96" r="48" fill="url(#purpleGrad)" opacity="0.25"/>
+  <!-- Trophy / Sparkle Icon -->
+  <path d="M60 62 H132 V88 C132 108 116 124 96 124 C76 124 60 108 60 88 Z" fill="url(#goldGrad)"/>
+  <path d="M46 70 C46 64 52 64 60 64 V82 C52 82 46 80 46 70 Z" fill="none" stroke="url(#goldGrad)" stroke-width="5" stroke-linecap="round"/>
+  <path d="M146 70 C146 64 140 64 132 64 V82 C140 82 146 80 146 70 Z" fill="none" stroke="url(#goldGrad)" stroke-width="5" stroke-linecap="round"/>
+  <path d="M96 124 V140" stroke="url(#goldGrad)" stroke-width="7" stroke-linecap="round"/>
+  <rect x="76" y="140" width="40" height="10" rx="4" fill="url(#goldGrad)"/>
+  <!-- Star Sparkle -->
+  <polygon points="96,44 100,56 112,60 100,64 96,76 92,64 80,60 92,56" fill="#FFF" opacity="0.9"/>
+</svg>

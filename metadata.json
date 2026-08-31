@@ -1,0 +1,6 @@
+{
+  "name": "PersonaTrivia AI",
+  "description": "An interactive trivia game featuring an AI game show host with dynamic personalities, real-time voice conversations, Search-grounded trivia, and TTS narration.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
