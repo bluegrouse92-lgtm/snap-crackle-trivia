@@ -37,9 +37,6 @@ export const DailyBonusModal: React.FC<DailyBonusModalProps> = ({
   const [timeUntilNext, setTimeUntilNext] = useState<{ hours: number; minutes: number }>(
     getTimeUntilNextDailyBonus()
   );
-  const [justClaimedAmount, setJustClaimedAmount] = useState<number | null>(null);
-  const [autoCloseCountdown, setAutoCloseCountdown] = useState<number>(3);
-  const autoCloseTimerRef = React.useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -47,44 +44,9 @@ export const DailyBonusModal: React.FC<DailyBonusModalProps> = ({
       setWallet(currentWallet);
       setIsEligible(canClaimDailyBonus());
       setTimeUntilNext(getTimeUntilNextDailyBonus());
-      setJustClaimedAmount(null);
-      setAutoCloseCountdown(3);
     }
-
-    return () => {
-      if (autoCloseTimerRef.current) {
-        clearTimeout(autoCloseTimerRef.current);
-      }
-    };
   }, [isOpen]);
 
-  // Handle auto-close countdown when claimed
-  useEffect(() => {
-    if (justClaimedAmount !== null) {
-      setAutoCloseCountdown(3);
-      
-      const interval = setInterval(() => {
-        setAutoCloseCountdown((prev) => {
-          if (prev <= 1) {
-            clearInterval(interval);
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-
-      autoCloseTimerRef.current = setTimeout(() => {
-        onClose();
-      }, 2800);
-
-      return () => {
-        clearInterval(interval);
-        if (autoCloseTimerRef.current) {
-          clearTimeout(autoCloseTimerRef.current);
-        }
-      };
-    }
-  }, [justClaimedAmount, onClose]);
 
   // Update countdown timer every minute
   useEffect(() => {
@@ -101,7 +63,6 @@ export const DailyBonusModal: React.FC<DailyBonusModalProps> = ({
     if (!isEligible) return;
 
     const result = claimDailyBonus();
-    setJustClaimedAmount(result.claimedAmount);
     setWallet(result.wallet);
     setIsEligible(false);
     setTimeUntilNext(getTimeUntilNextDailyBonus());
@@ -116,6 +77,9 @@ export const DailyBonusModal: React.FC<DailyBonusModalProps> = ({
 
     playSoundFX('fanfare');
     onCoinsClaimed?.(result.wallet);
+    
+    // Close modal after a short delay so the user sees the reward
+    setTimeout(onClose, 1000);
   };
 
   if (!isOpen) return null;
@@ -226,50 +190,7 @@ export const DailyBonusModal: React.FC<DailyBonusModalProps> = ({
             </div>
 
             {/* Claim Action Box */}
-            {justClaimedAmount ? (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-center space-y-3"
-              >
-                <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400">
-                  <Sparkles className="w-6 h-6 animate-spin" />
-                </div>
-                <h3 className="text-lg font-bold text-emerald-300">
-                  +{justClaimedAmount} Coins Added!
-                </h3>
-                <p className="text-xs text-slate-300">
-                  Your new balance is{' '}
-                  <span className="font-bold text-amber-300">
-                    {wallet.balance.toLocaleString()} coins
-                  </span>
-                  .
-                </p>
-
-                {/* Auto-closing bar */}
-                <div className="pt-2">
-                  <div className="flex items-center justify-between text-[11px] text-emerald-400/80 mb-1">
-                    <span>Returning to game...</span>
-                    <span>{autoCloseCountdown}s</span>
-                  </div>
-                  <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                    <motion.div
-                      initial={{ width: '100%' }}
-                      animate={{ width: '0%' }}
-                      transition={{ duration: 2.7, ease: 'linear' }}
-                      className="h-full bg-emerald-400"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  onClick={onClose}
-                  className="mt-1 py-1.5 px-4 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-200 text-xs font-semibold border border-emerald-500/40 transition-colors"
-                >
-                  Close Now
-                </button>
-              </motion.div>
-            ) : isEligible ? (
+            {isEligible ? (
               <div className="space-y-3">
                 <button
                   onClick={handleClaim}

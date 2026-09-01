@@ -16,6 +16,7 @@ import { TriviaQuestionCard } from './components/TriviaQuestionCard';
 import { PersonalitySelector } from './components/PersonalitySelector';
 import { GameSetupModal } from './components/GameSetupModal';
 import { GameOverSummary } from './components/GameOverSummary';
+import { GameView } from './components/GameView';
 import { LiveVoiceModal } from './components/LiveVoiceModal';
 import { LeaderboardModal } from './components/LeaderboardModal';
 import { DailyBonusModal } from './components/DailyBonusModal';
@@ -243,6 +244,12 @@ export default function App() {
         }),
       });
 
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('TTS API error:', res.status, errorText);
+        throw new Error(`TTS API failed: ${res.status}`);
+      }
+
       const data = await res.json();
       setIsLoadingVoice(false);
 
@@ -292,7 +299,9 @@ export default function App() {
       });
 
       if (!res.ok) {
-        throw new Error('Failed to generate trivia questions');
+        const errorText = await res.text();
+        console.error('Trivia API error response:', errorText);
+        throw new Error(`Failed to generate trivia questions: ${res.status} ${res.statusText}`);
       }
 
       const data = await res.json();
@@ -342,7 +351,7 @@ export default function App() {
     } catch (err: any) {
       console.error('Game start error:', err);
       setIsLoadingTrivia(false);
-      alert(`Error starting game: ${err.message}. Please check your API connection.`);
+      alert(`Error starting game: ${err.message}. Please check the API.`);
     }
   };
 
@@ -819,75 +828,39 @@ export default function App() {
             onOpenDailyBonus={() => setIsDailyBonusOpen(true)}
           />
         ) : (
-          <>
-            {/* Host Avatar & Speech Stage */}
-            <HostStage
-              personality={personality}
-              mood={gameState.hostMood}
-              speechText={gameState.hostSpeechText}
-              isSpeaking={gameState.isHostSpeaking}
-              isLoadingVoice={isLoadingVoice}
-              onReplayVoice={() => speakHostLine(gameState.hostSpeechText, personality.voice)}
-              onOpenLiveVoice={() => setIsLiveVoiceModalOpen(true)}
-            />
-
-            {/* View 1: Game Setup / Category & Difficulty Selector */}
-            {gameState.status === 'setup' && (
-              <GameSetupModal
-                personality={personality}
-                onStartGame={handleStartGame}
-                onOpenPersonalitySelector={() => setIsPersonalityModalOpen(true)}
-                onOpenDailyBonus={() => setIsDailyBonusOpen(true)}
-                isLoading={isLoadingTrivia}
-              />
-            )}
-
-            {/* View 2: Active Playing Trivia Card */}
-            {gameState.status === 'playing' && gameState.questions.length > 0 && (
-              <TriviaQuestionCard
-                question={gameState.questions[gameState.currentIndex]}
-                selectedOption={selectedOption}
-                hasAnswered={hasAnswered}
-                onSelectOption={handleSelectOption}
-                onNextQuestion={handleNextQuestion}
-                lifelines={gameState.lifelines}
-                eliminatedOptions={gameState.eliminatedOptions}
-                onUse5050={handleUse5050}
-                onUseHint={handleUseHint}
-                onUseSearchGrounding={handleUseSearchGrounding}
-                onToggleDoubleDown={handleToggleDoubleDown}
-                currentHint={gameState.currentHint}
-                searchFact={gameState.currentSearchFact}
-                isLoadingLifeline={isLoadingLifeline}
-                timeRemaining={timeRemaining}
-                maxTime={maxTime}
-                isDoubleDownActive={gameState.lifelines.doubleDownActive}
-                scoreBreakdown={currentScoreBreakdown}
-              />
-            )}
-
-            {/* View 3: Game Over Summary */}
-            {gameState.status === 'game_over' && (
-              <GameOverSummary
-                state={gameState}
-                personality={personality}
-                onPlayAgain={() => {
-                  stopCurrentAudio();
-                  setGameState((prev) => ({ ...prev, status: 'setup' }));
-                }}
-                onSelectNewHost={() => {
-                  stopCurrentAudio();
-                  setIsPersonalityModalOpen(true);
-                }}
-                onReplayFinalSpeech={() => speakHostLine(gameState.hostSpeechText, personality.voice)}
-                onOpenLeaderboard={(highlightId) => {
-                  setHighlightLeaderboardId(highlightId);
-                  setIsLeaderboardOpen(true);
-                }}
-                onOpenDailyBonus={() => setIsDailyBonusOpen(true)}
-              />
-            )}
-          </>
+          <GameView
+            gameState={gameState}
+            personality={personality}
+            onStartGame={handleStartGame}
+            onOpenPersonalitySelector={() => setIsPersonalityModalOpen(true)}
+            onOpenDailyBonus={() => setIsDailyBonusOpen(true)}
+            isLoadingTrivia={isLoadingTrivia}
+            selectedOption={selectedOption}
+            hasAnswered={hasAnswered}
+            onSelectOption={handleSelectOption}
+            onNextQuestion={handleNextQuestion}
+            onUse5050={handleUse5050}
+            onUseHint={handleUseHint}
+            onUseSearchGrounding={handleUseSearchGrounding}
+            onToggleDoubleDown={handleToggleDoubleDown}
+            isLoadingLifeline={isLoadingLifeline}
+            timeRemaining={timeRemaining}
+            maxTime={maxTime}
+            scoreBreakdown={currentScoreBreakdown}
+            onPlayAgain={() => {
+              stopCurrentAudio();
+              setGameState((prev) => ({ ...prev, status: 'setup' }));
+            }}
+            onSelectNewHost={() => {
+              stopCurrentAudio();
+              setIsPersonalityModalOpen(true);
+            }}
+            onReplaySpeech={() => speakHostLine(gameState.hostSpeechText, personality.voice)}
+            onOpenLeaderboard={(highlightId) => {
+              setHighlightLeaderboardId(highlightId);
+              setIsLeaderboardOpen(true);
+            }}
+          />
         )}
       </main>
 

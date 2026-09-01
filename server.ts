@@ -302,18 +302,31 @@ app.post('/api/host-tts', async (req, res) => {
     const validVoices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'];
     const chosenVoice = validVoices.includes(voice) ? voice : 'Puck';
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-tts-preview',
-      contents: [{ parts: [{ text: cleanText }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: chosenVoice },
+    const generateWithRetry = async (text: string, voice: string, retries = 3, delay = 2000): Promise<any> => {
+      try {
+        return await ai.models.generateContent({
+          model: 'gemini-3.1-flash-tts-preview',
+          contents: [{ parts: [{ text }] }],
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName: voice },
+              },
+            },
           },
-        },
-      },
-    });
+        });
+      } catch (error: any) {
+        if (retries > 0 && error.status === 429) {
+          console.warn(`TTS quota exceeded, retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return generateWithRetry(text, voice, retries - 1, delay * 2);
+        }
+        throw error;
+      }
+    };
+
+    const response = await generateWithRetry(cleanText, chosenVoice);
 
     const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
 
