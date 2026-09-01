@@ -218,6 +218,7 @@ export default function App() {
       betAmount: wallet.balance >= bet ? bet : 0,
       autoPlayVoice: true,
       enableLiveVoice: false,
+      isSinglePlayer: false,
     };
 
     handleCreateMultiplayerRoom(settings, playerName);
@@ -268,6 +269,7 @@ export default function App() {
 
   // Start new match
   const handleStartGame = async (settings: GameSettings) => {
+    console.log('App: handleStartGame called with:', settings);
     try {
       // Handle Coin Bet
       if (settings.betAmount && settings.betAmount > 0) {
@@ -286,6 +288,7 @@ export default function App() {
       setCurrentScoreBreakdown(null);
 
       // Call Search Grounded Trivia Generation API
+      console.log('App: Calling /api/generate-trivia');
       const res = await fetch('/api/generate-trivia', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -304,8 +307,17 @@ export default function App() {
         throw new Error(`Failed to generate trivia questions: ${res.status} ${res.statusText}`);
       }
 
-      const data = await res.json();
+      const dataText = await res.text();
+      console.log('App: Received response from /api/generate-trivia:', dataText);
+      let data;
+      try {
+        data = JSON.parse(dataText);
+      } catch (e) {
+        console.error('Trivia API returned invalid JSON:', dataText);
+        throw new Error('Trivia generator returned malformed data.');
+      }
       const questions: TriviaQuestion[] = data.questions || [];
+      console.log('App: Parsed questions:', questions);
 
       if (questions.length === 0) {
         throw new Error('No questions received from generator');
@@ -315,6 +327,7 @@ export default function App() {
       const initialSpeech = firstQ.hostCommentary || `Welcome, contenders! Let us begin our battle of wits with question number one.`;
 
       setGameState({
+        mode: settings.isSinglePlayer ? 'single' : 'multiplayer',
         status: 'playing',
         questions,
         currentIndex: 0,
@@ -336,7 +349,7 @@ export default function App() {
         hostSpeechText: initialSpeech,
         isHostSpeaking: false,
         liveVoiceConnected: false,
-        settings,
+        currentWager: settings.betAmount,
       });
 
       setSelectedOption(null);
@@ -816,7 +829,7 @@ export default function App() {
       />
 
       {/* Main Arena Content */}
-      <main className="flex-1 max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-6 relative z-10">
+      <main className="h-[calc(100vh-120px)] overflow-y-auto max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-6 relative z-10">
         {/* MULTIPLAYER ARENA VIEW */}
         {activeMode === 'multiplayer' ? (
           <MultiplayerArena
@@ -849,6 +862,7 @@ export default function App() {
             scoreBreakdown={currentScoreBreakdown}
             onPlayAgain={() => {
               stopCurrentAudio();
+              refreshWallet();
               setGameState((prev) => ({ ...prev, status: 'setup' }));
             }}
             onSelectNewHost={() => {
@@ -856,6 +870,7 @@ export default function App() {
               setIsPersonalityModalOpen(true);
             }}
             onReplaySpeech={() => speakHostLine(gameState.hostSpeechText, personality.voice)}
+            onOpenLiveVoice={() => setIsLiveVoiceModalOpen(true)}
             onOpenLeaderboard={(highlightId) => {
               setHighlightLeaderboardId(highlightId);
               setIsLeaderboardOpen(true);

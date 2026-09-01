@@ -253,7 +253,7 @@ export const TriviaQuestionCard: React.FC<TriviaQuestionCardProps> = ({
 
       {/* Question Text */}
       <div className="py-2">
-        <h3 className="text-xl sm:text-2xl md:text-3xl font-bold font-sans text-white tracking-tight leading-snug">
+        <h3 className="text-2xl sm:text-3xl md:text-4xl font-extrabold font-sans text-white tracking-tight leading-snug drop-shadow-lg">
           {question.question}
         </h3>
       </div>

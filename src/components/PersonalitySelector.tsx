@@ -348,6 +348,7 @@ export const PersonalitySelector: React.FC<PersonalitySelectorProps> = ({
                     <option value="Fenrir">Fenrir (Authoritative, Resonant, Deep)</option>
                     <option value="Charon">Charon (Analytical, Cybernetic, Steady)</option>
                     <option value="Kore">Kore (Calm, Serene, Poetic)</option>
+                    <option value="Aoede">Aoede (Refined, Eloquent, British Accent)</option>
                   </select>
                 </div>
                 <div>

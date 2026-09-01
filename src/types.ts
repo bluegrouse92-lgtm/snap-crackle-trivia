@@ -1,4 +1,4 @@
-export type HostVoiceName = 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr';
+export type HostVoiceName = 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr' | 'Aoede';
 
 export type HostMood = 'welcoming' | 'thinking' | 'excited' | 'roasting' | 'dramatic' | 'praising' | 'facepalm';
 
@@ -59,6 +59,7 @@ export interface GameSettings {
   autoPlayVoice: boolean;
   enableLiveVoice: boolean;
   betAmount: number; // Coins wagered for the match
+  isSinglePlayer: boolean;
 }
 
 export interface ScoreBreakdown {

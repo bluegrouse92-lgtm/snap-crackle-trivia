@@ -164,14 +164,59 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// 1. Generate Trivia Questions with Search Grounding using gemini-3.5-flash
+// Category Mapping for Open Trivia Database
+const CATEGORY_MAP: Record<string, number> = {
+  'science_nature': 17,
+  'world_history': 23,
+  'geography_wonders': 22,
+  'literature_arts': 10,
+  'pop_culture_gaming': 11, // Using Entertainment: Film as a proxy for pop culture
+  'breaking_news': 9, // Using General Knowledge as a proxy
+};
+
+// 1. Generate Trivia Questions
 app.post('/api/generate-trivia', async (req, res) => {
   try {
     const { category, customTopic, difficulty = 'Medium', count = 5, personality } = req.body;
 
+    // Use Open Trivia DB for standard categories
+    if (CATEGORY_MAP[category]) {
+      const difficultyParam = difficulty.toLowerCase();
+      const url = `https://opentdb.com/api.php?amount=${count}&category=${CATEGORY_MAP[category]}&difficulty=${difficultyParam}&type=multiple`;
+      console.log('Fetching from OpenTriviaDB:', url);
+      const response = await fetch(url);
+      const data = await response.json();
+      console.log('OpenTriviaDB response:', data);
+      
+      if (data.response_code === 0) {
+        const questions = data.results.map((q: any, idx: number) => {
+          const options = [...q.incorrect_answers, q.correct_answer];
+          // Simple shuffle
+          options.sort(() => Math.random() - 0.5);
+          const correctIndex = options.indexOf(q.correct_answer);
+          
+          return {
+            id: `q_${Date.now()}_${idx}`,
+            question: q.question.replace(/&quot;/g, '"').replace(/&#039;/g, "'"),
+            options: options.map(o => o.replace(/&quot;/g, '"').replace(/&#039;/g, "'")),
+            correctIndex,
+            correctAnswer: q.correct_answer.replace(/&quot;/g, '"').replace(/&#039;/g, "'"),
+            explanation: 'Verified fact.',
+            category: category,
+            difficulty: difficulty,
+            hostCommentary: 'Interesting choice! Let us see if it is correct.',
+            funFact: 'This is a verified fact from the Open Trivia Database.',
+          };
+        });
+        return res.json({ questions });
+      }
+      console.warn('OpenTriviaDB returned response code:', data.response_code, 'Falling back to Gemini.');
+    }
+
+    // Fallback/Default to Gemini generation for Custom, Breaking News, or if API fails
     const normalizedDifficulty: 'Easy' | 'Medium' | 'Hard' =
       difficulty === 'Easy' ? 'Easy' : difficulty === 'Hard' ? 'Hard' : 'Medium';
-
+    
     const difficultyCriteria = {
       Easy: 'EASY LEVEL: Questions MUST be widely known common knowledge, recognizable pop culture/history/science, and accessible to broad general audiences (no obscure facts).',
       Medium: 'MEDIUM LEVEL: Questions MUST require specific domain knowledge, notable details, secondary historical figures, scientific principles, and intermediate trivia depth.',
@@ -224,13 +269,26 @@ You MUST return ONLY a valid JSON array matching this exact JSON structure (wrap
 ]
 \`\`\``;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-      },
-    });
+    const generateTriviaWithRetry = async (prompt: string, retries = 5, delay = 2000): Promise<any> => {
+      try {
+        return await ai.models.generateContent({
+          model: 'gemini-3.5-flash',
+          contents: prompt,
+          config: {
+            tools: [{ googleSearch: {} }],
+          },
+        });
+      } catch (error: any) {
+        if (retries > 0 && error.status === 429) {
+          console.warn(`Trivia quota exceeded, retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          return generateTriviaWithRetry(prompt, retries - 1, Math.floor(delay * 1.2));
+        }
+        throw error;
+      }
+    };
+
+    const response = await generateTriviaWithRetry(prompt);
 
     const responseText = response.text || '';
     
@@ -249,18 +307,26 @@ You MUST return ONLY a valid JSON array matching this exact JSON structure (wrap
 
     // Parse JSON array from response
     let jsonStr = responseText;
+    
+    // Attempt to extract JSON from markdown fence or raw array
     const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/) || responseText.match(/\[\s*\{[\s\S]*\}\s*\]/);
     if (jsonMatch) {
       jsonStr = jsonMatch[1] || jsonMatch[0];
+    } else {
+        // Fallback: search for first [ and last ]
+        const firstBracket = responseText.indexOf('[');
+        const lastBracket = responseText.lastIndexOf(']');
+        if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+            jsonStr = responseText.substring(firstBracket, lastBracket + 1);
+        }
     }
 
     let questions = [];
     try {
       questions = JSON.parse(jsonStr);
     } catch (parseErr) {
-      console.error('Failed to parse JSON directly, falling back:', parseErr);
-      const cleaned = jsonStr.replace(/^[^{[]*/, '').replace(/[^}\]]*$/, '');
-      questions = JSON.parse(cleaned);
+      console.error('Failed to parse JSON:', parseErr, 'Raw response:', responseText.substring(0, 500));
+      throw new Error('Failed to parse trivia questions JSON');
     }
 
     // Attach grounding sources to questions
@@ -285,6 +351,7 @@ You MUST return ONLY a valid JSON array matching this exact JSON structure (wrap
   }
 });
 
+
 // 2. Host Text-to-Speech (TTS) using gemini-3.1-flash-tts-preview
 app.post('/api/host-tts', async (req, res) => {
   try {
@@ -299,10 +366,10 @@ app.post('/api/host-tts', async (req, res) => {
       .replace(/https?:\/\/\S+/g, '')
       .trim();
 
-    const validVoices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr'];
+    const validVoices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr', 'Aoede'];
     const chosenVoice = validVoices.includes(voice) ? voice : 'Puck';
 
-    const generateWithRetry = async (text: string, voice: string, retries = 3, delay = 2000): Promise<any> => {
+    const generateWithRetry = async (text: string, voice: string, retries = 5, delay = 5000): Promise<any> => {
       try {
         return await ai.models.generateContent({
           model: 'gemini-3.1-flash-tts-preview',
@@ -334,9 +401,12 @@ app.post('/api/host-tts', async (req, res) => {
       return res.status(500).json({ error: 'No audio returned from TTS model' });
     }
 
+    // Send response strictly as JSON
+    res.setHeader('Content-Type', 'application/json');
     res.json({ audio: base64Audio, voice: chosenVoice });
   } catch (error: any) {
     console.error('Error in host TTS:', error);
+    res.setHeader('Content-Type', 'application/json');
     res.status(500).json({ error: error.message || 'Failed to generate host speech' });
   }
 });

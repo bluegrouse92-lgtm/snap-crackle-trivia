@@ -325,6 +325,14 @@ export const GameOverSummary: React.FC<GameOverSummaryProps> = ({
           </button>
 
           <button
+            id="return-home-btn"
+            onClick={onPlayAgain}
+            className="px-5 py-3 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 text-white font-semibold text-sm flex items-center gap-2 backdrop-blur-md transition-colors"
+          >
+            <span>Close & Return Home</span>
+          </button>
+
+          <button
             id="view-leaderboard-btn"
             onClick={() => onOpenLeaderboard()}
             className="px-5 py-3 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/15 text-white font-semibold text-sm flex items-center gap-2 backdrop-blur-md transition-colors"

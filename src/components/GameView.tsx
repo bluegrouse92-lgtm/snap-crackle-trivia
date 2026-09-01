@@ -27,6 +27,7 @@ interface GameViewProps {
   onPlayAgain: () => void;
   onSelectNewHost: () => void;
   onReplaySpeech: () => void;
+  onOpenLiveVoice: () => void;
   onOpenLeaderboard: (id?: string) => void;
 }
 
@@ -52,6 +53,7 @@ export const GameView: React.FC<GameViewProps> = ({
   onPlayAgain,
   onSelectNewHost,
   onReplaySpeech,
+  onOpenLiveVoice,
   onOpenLeaderboard,
 }) => {
   return (
@@ -61,9 +63,8 @@ export const GameView: React.FC<GameViewProps> = ({
         mood={gameState.hostMood}
         speechText={gameState.hostSpeechText}
         isSpeaking={gameState.isHostSpeaking}
-        isLoadingVoice={false} // Should be passed in
         onReplayVoice={onReplaySpeech}
-        onOpenLiveVoice={() => {}} // Should be passed in
+        onOpenLiveVoice={onOpenLiveVoice} // Should be passed in
       />
 
       {gameState.status === 'setup' && (

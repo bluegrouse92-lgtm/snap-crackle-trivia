@@ -102,6 +102,7 @@ export const MultiplayerJoinModal: React.FC<MultiplayerJoinModalProps> = ({
       betAmount: wager,
       autoPlayVoice: true,
       enableLiveVoice: false,
+      isSinglePlayer: false,
     };
 
     onCreateRoom(settings, playerName.trim());
