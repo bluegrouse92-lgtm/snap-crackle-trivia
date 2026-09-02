@@ -25,6 +25,7 @@ interface GameViewProps {
   maxTime: number;
   scoreBreakdown: ScoreBreakdown | null;
   onPlayAgain: () => void;
+  onReturnHome: () => void;
   onSelectNewHost: () => void;
   onReplaySpeech: () => void;
   onOpenLiveVoice: () => void;
@@ -51,6 +52,7 @@ export const GameView: React.FC<GameViewProps> = ({
   maxTime,
   scoreBreakdown,
   onPlayAgain,
+  onReturnHome,
   onSelectNewHost,
   onReplaySpeech,
   onOpenLiveVoice,
@@ -105,6 +107,7 @@ export const GameView: React.FC<GameViewProps> = ({
           state={gameState}
           personality={personality}
           onPlayAgain={onPlayAgain}
+          onReturnHome={onReturnHome}
           onSelectNewHost={onSelectNewHost}
           onReplayFinalSpeech={onReplaySpeech}
           onOpenLeaderboard={onOpenLeaderboard}

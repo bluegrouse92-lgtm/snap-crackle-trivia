@@ -10,6 +10,7 @@ import {
   MultiplayerRoomState,
 } from './types';
 import { PRESET_PERSONALITIES } from './data/personalities';
+import { getRandomBanter } from './data/banterLibrary';
 import { Header } from './components/Header';
 import { HostStage } from './components/HostStage';
 import { TriviaQuestionCard } from './components/TriviaQuestionCard';
@@ -419,20 +420,7 @@ export default function App() {
     setCurrentScoreBreakdown(breakdown);
 
     // Dynamic banter for timeout
-    let reactionText = `Time has expired! The clock has run out. The correct answer was ${currentQ.correctAnswer}.`;
-    try {
-      const res = await fetch('/api/host-banter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          eventType: 'time_out',
-          personality,
-          context: { question: currentQ.question, correctAnswer: currentQ.correctAnswer },
-        }),
-      });
-      const data = await res.json();
-      if (data.text) reactionText = data.text;
-    } catch {}
+    let reactionText = getRandomBanter('timeout') + ` The correct answer was ${currentQ.correctAnswer}.`;
 
     setGameState((prev) => ({
       ...prev,
@@ -531,30 +519,10 @@ export default function App() {
     const nextScore = Math.max(0, gameState.score + points);
     const nextHighest = Math.max(gameState.highestStreak, nextStreak);
 
-    // Call dynamic Host reaction API
+    // Call dynamic Host reaction
     let reactionText = isCorrect
-      ? `Splendid! ${currentQ.correctAnswer} is undeniably correct.`
-      : `Alas, that is incorrect. The true answer is ${currentQ.correctAnswer}.`;
-
-    try {
-      const res = await fetch('/api/host-banter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          eventType: isCorrect ? (nextStreak >= 3 ? 'correct_streak' : 'correct_answer') : 'wrong_answer',
-          personality,
-          context: {
-            question: currentQ.question,
-            userChoice: currentQ.options[optionIndex],
-            correctAnswer: currentQ.correctAnswer,
-            streak: nextStreak,
-            isDoubleDown,
-          },
-        }),
-      });
-      const data = await res.json();
-      if (data.text) reactionText = data.text;
-    } catch {}
+      ? getRandomBanter('correct')
+      : getRandomBanter('wrong');
 
     setGameState((prev) => ({
       ...prev,
@@ -595,30 +563,13 @@ export default function App() {
     const nextIdx = gameState.currentIndex + 1;
 
     if (nextIdx >= gameState.questions.length) {
+      console.log('App: Game Over condition met', { nextIdx, total: gameState.questions.length });
       // Game Over
       playSoundFX('fanfare');
       const correctCount = gameState.answersHistory.filter((a) => a.isCorrect).length;
       const total = gameState.questions.length;
 
-      let finalClosing = `That concludes our match! You scored ${gameState.score.toLocaleString()} points with ${correctCount} of ${total} correct answers.`;
-      try {
-        const res = await fetch('/api/host-banter', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            eventType: 'game_over',
-            personality,
-            context: {
-              finalScore: gameState.score,
-              correctCount,
-              total,
-              highestStreak: gameState.highestStreak,
-            },
-          }),
-        });
-        const data = await res.json();
-        if (data.text) finalClosing = data.text;
-      } catch {}
+      let finalClosing = getRandomBanter('game_over') + ` You scored ${gameState.score.toLocaleString()} points with ${correctCount} of ${total} correct answers.`;
 
       setGameState((prev) => ({
         ...prev,
@@ -670,20 +621,7 @@ export default function App() {
     const shuffled = wrongIndices.sort(() => 0.5 - Math.random());
     const toEliminate = shuffled.slice(0, 2);
 
-    let banter = "I have banished two decoy options into the ether. Choose wisely!";
-    try {
-      const res = await fetch('/api/host-banter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          eventType: 'lifeline_5050',
-          personality,
-          context: { question: currentQ.question },
-        }),
-      });
-      const data = await res.json();
-      if (data.text) banter = data.text;
-    } catch {}
+    let banter = getRandomBanter('lifeline');
 
     setGameState((prev) => ({
       ...prev,
@@ -705,21 +643,7 @@ export default function App() {
     setIsLoadingLifeline(true);
 
     const currentQ = gameState.questions[gameState.currentIndex];
-    let hintText = `Focus on the historical context and eliminate obvious modern anomalies.`;
-
-    try {
-      const res = await fetch('/api/host-banter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          eventType: 'hint_request',
-          personality,
-          context: { question: currentQ.question, options: currentQ.options, correctAnswer: currentQ.correctAnswer },
-        }),
-      });
-      const data = await res.json();
-      if (data.text) hintText = data.text;
-    } catch {}
+    let hintText = getRandomBanter('lifeline');
 
     setIsLoadingLifeline(false);
     setGameState((prev) => ({
@@ -863,7 +787,12 @@ export default function App() {
             onPlayAgain={() => {
               stopCurrentAudio();
               refreshWallet();
-              setGameState((prev) => ({ ...prev, status: 'setup' }));
+              setGameState((prev) => ({ ...prev, status: 'playing', currentIndex: 0, score: 0, answersHistory: [] }));
+            }}
+            onReturnHome={() => {
+              stopCurrentAudio();
+              refreshWallet();
+              setGameState((prev) => ({ ...prev, status: 'setup', currentIndex: 0, score: 0, answersHistory: [] }));
             }}
             onSelectNewHost={() => {
               stopCurrentAudio();
