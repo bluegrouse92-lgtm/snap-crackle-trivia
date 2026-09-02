@@ -7,6 +7,7 @@ interface MultiplayerPlayer {
   avatar: string;
   coins: number;
   bet: number;
+  questionWager: number;
   score: number;
   streak: number;
   isReady: boolean;
@@ -90,6 +91,11 @@ const BOT_NAMES = [
   { name: 'PixelPaladin', avatar: 'shield' },
   { name: 'NovaQuizzler', avatar: 'flame' },
   { name: 'DrTrivia_Bot', avatar: 'book' },
+  { name: 'NeonNerd', avatar: 'moon' },
+  { name: 'DataDestroyer', avatar: 'target' },
+  { name: 'LogicLlama', avatar: 'smile' },
+  { name: 'CodeCrusher', avatar: 'terminal' },
+  { name: 'QuizQueen_Bot', avatar: 'crown' },
 ];
 
 export function broadcastRoomState(room: MultiplayerRoom) {
@@ -198,6 +204,7 @@ export function handleMultiplayerConnection(ws: WebSocket, ai: GoogleGenAI) {
           avatar: player.avatar || 'trophy',
           coins: typeof player.coins === 'number' ? player.coins : 500,
           bet: typeof settings?.betAmount === 'number' ? settings.betAmount : 50,
+          questionWager: 0,
           score: 0,
           streak: 0,
           isReady: true,
@@ -259,6 +266,47 @@ export function handleMultiplayerConnection(ws: WebSocket, ai: GoogleGenAI) {
         activeRooms.set(roomId, newRoom);
         ws.send(JSON.stringify({ type: 'room_joined', roomId, roomCode, playerId: hostPlayer.id }));
         broadcastRoomState(newRoom);
+
+        // Auto-add bot if alone after 5 seconds
+        setTimeout(() => {
+          const room = activeRooms.get(roomId);
+          if (room && room.status === 'lobby' && room.players.length === 1) {
+            // Logic to add bot (similar to add_bot case)
+            const availableBots = BOT_NAMES.filter(
+              (b) => !room.players.some((p) => p.name === b.name)
+            );
+            const botConfig = availableBots.length > 0 ? availableBots[0] : { name: `Bot_${room.players.length + 1}`, avatar: 'zap' };
+            const botPlayer: MultiplayerPlayer = {
+              id: `bot_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+              name: botConfig.name,
+              avatar: botConfig.avatar,
+              coins: 1000,
+              bet: room.settings.betAmount,
+              questionWager: 0,
+              score: 0,
+              streak: 0,
+              isReady: true,
+              isConnected: true,
+              isHost: false,
+              hasAnsweredCurrent: false,
+              currentAnswerIndex: null,
+              lastAnswerCorrect: null,
+              lastPointsEarned: 0,
+              isBot: true,
+            };
+            room.players.push(botPlayer);
+            room.potTotal += botPlayer.bet;
+            room.chatMessages.push({
+              id: `msg_${Date.now()}`,
+              senderId: 'system',
+              senderName: 'Host Announcer',
+              text: `🤖 ${botPlayer.name} joined automatically as an AI Contender! Pot: ${room.potTotal} coins.`,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              isSystem: true,
+            });
+            broadcastRoomState(room);
+          }
+        }, 5000);
       }
 
       // 2. JOIN ROOM (via roomCode or roomId)
@@ -295,6 +343,7 @@ export function handleMultiplayerConnection(ws: WebSocket, ai: GoogleGenAI) {
           avatar: player.avatar || 'zap',
           coins: typeof player.coins === 'number' ? player.coins : 500,
           bet: targetRoom.settings.betAmount,
+          questionWager: 0,
           score: 0,
           streak: 0,
           isReady: false,
@@ -354,6 +403,7 @@ export function handleMultiplayerConnection(ws: WebSocket, ai: GoogleGenAI) {
             avatar: player.avatar || 'sparkles',
             coins: typeof player.coins === 'number' ? player.coins : 500,
             bet: openRoom.settings.betAmount,
+            questionWager: 0,
             score: 0,
             streak: 0,
             isReady: false,
@@ -396,6 +446,7 @@ export function handleMultiplayerConnection(ws: WebSocket, ai: GoogleGenAI) {
             avatar: player.avatar || 'trophy',
             coins: typeof player.coins === 'number' ? player.coins : 500,
             bet: 50,
+            questionWager: 0,
             score: 0,
             streak: 0,
             isReady: true,
@@ -475,6 +526,7 @@ export function handleMultiplayerConnection(ws: WebSocket, ai: GoogleGenAI) {
           avatar: botConfig.avatar,
           coins: 1000,
           bet: room.settings.betAmount,
+          questionWager: 0,
           score: 0,
           streak: 0,
           isReady: true,

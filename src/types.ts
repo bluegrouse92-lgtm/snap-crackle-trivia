@@ -136,6 +136,7 @@ export interface MultiplayerPlayer {
   avatar: string;
   coins: number;
   bet: number;
+  questionWager: number; // Current question bet
   score: number;
   streak: number;
   isReady: boolean;

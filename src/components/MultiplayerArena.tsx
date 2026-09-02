@@ -40,7 +40,9 @@ interface MultiplayerArenaProps {
   onLeaveRoom: () => void;
   personalities: HostPersonality[];
   onOpenDailyBonus?: () => void;
+  onSetWager: (amount: number) => void;
 }
+
 
 const QUICK_EMOTES = ['🧠 Big Brain', '🔥 On Fire!', '⚡ Super Fast!', '💀 Oof', '🎉 GG!', '👑 Crown Me'];
 
@@ -51,11 +53,13 @@ export const MultiplayerArena: React.FC<MultiplayerArenaProps> = ({
   onLeaveRoom,
   personalities,
   onOpenDailyBonus,
+  onSetWager,
 }) => {
   const [copied, setCopied] = useState(false);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [showChat, setShowChat] = useState(true);
+  const [wager, setWager] = useState(0);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const hasSettledPrizeRef = useRef<boolean>(false);
 
@@ -516,6 +520,23 @@ export const MultiplayerArena: React.FC<MultiplayerArenaProps> = ({
                   </p>
                 </div>
               )}
+
+              {/* Betting Input */}
+              <div className="mb-4 flex items-center gap-3 bg-slate-800 p-3 rounded-lg">
+                <span className="text-sm font-semibold text-slate-300">Wager:</span>
+                <input
+                  type="number"
+                  value={wager}
+                  onChange={(e) => setWager(Math.min(me?.coins || 0, Math.max(0, parseInt(e.target.value) || 0)))}
+                  className="bg-slate-950 border border-slate-700 text-white rounded p-1 w-20 text-sm"
+                />
+                <button
+                  onClick={() => onSetWager(wager)}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1 rounded"
+                >
+                  Set Wager
+                </button>
+              </div>
 
               {/* Question Text */}
               <h3 className="text-xl sm:text-2xl font-bold text-slate-100 leading-snug mb-6">

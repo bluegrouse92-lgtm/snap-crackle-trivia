@@ -7,6 +7,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { handleMultiplayerConnection, activeRooms } from './server/multiplayer';
+import { TRIVIA_QUESTIONS } from './server/trivia';
 
 dotenv.config();
 
@@ -177,174 +178,18 @@ const CATEGORY_MAP: Record<string, number> = {
 // 1. Generate Trivia Questions
 app.post('/api/generate-trivia', async (req, res) => {
   try {
-    const { category, customTopic, difficulty = 'Medium', count = 5, personality } = req.body;
-
-    // Use Open Trivia DB for standard categories
-    if (CATEGORY_MAP[category]) {
-      const difficultyParam = difficulty.toLowerCase();
-      const url = `https://opentdb.com/api.php?amount=${count}&category=${CATEGORY_MAP[category]}&difficulty=${difficultyParam}&type=multiple`;
-      console.log('Fetching from OpenTriviaDB:', url);
-      const response = await fetch(url);
-      const data = await response.json();
-      console.log('OpenTriviaDB response:', data);
-      
-      if (data.response_code === 0) {
-        const questions = data.results.map((q: any, idx: number) => {
-          const options = [...q.incorrect_answers, q.correct_answer];
-          // Simple shuffle
-          options.sort(() => Math.random() - 0.5);
-          const correctIndex = options.indexOf(q.correct_answer);
-          
-          return {
-            id: `q_${Date.now()}_${idx}`,
-            question: q.question.replace(/&quot;/g, '"').replace(/&#039;/g, "'"),
-            options: options.map(o => o.replace(/&quot;/g, '"').replace(/&#039;/g, "'")),
-            correctIndex,
-            correctAnswer: q.correct_answer.replace(/&quot;/g, '"').replace(/&#039;/g, "'"),
-            explanation: 'Verified fact.',
-            category: category,
-            difficulty: difficulty,
-            hostCommentary: 'Interesting choice! Let us see if it is correct.',
-            funFact: 'This is a verified fact from the Open Trivia Database.',
-          };
-        });
-        return res.json({ questions });
-      }
-      console.warn('OpenTriviaDB returned response code:', data.response_code, 'Falling back to Gemini.');
-    }
-
-    // Fallback/Default to Gemini generation for Custom, Breaking News, or if API fails
-    const normalizedDifficulty: 'Easy' | 'Medium' | 'Hard' =
-      difficulty === 'Easy' ? 'Easy' : difficulty === 'Hard' ? 'Hard' : 'Medium';
+    const { category, difficulty = 'Medium', count = 5 } = req.body;
     
-    const difficultyCriteria = {
-      Easy: 'EASY LEVEL: Questions MUST be widely known common knowledge, recognizable pop culture/history/science, and accessible to broad general audiences (no obscure facts).',
-      Medium: 'MEDIUM LEVEL: Questions MUST require specific domain knowledge, notable details, secondary historical figures, scientific principles, and intermediate trivia depth.',
-      Hard: 'HARD LEVEL: Questions MUST be challenging for most players, obscure trivia, mind-bending historical nuances, deep scientific or cultural specifics, and tricky distinctions.',
-    }[normalizedDifficulty];
+    // Filter by category and difficulty if needed
+    let questions = TRIVIA_QUESTIONS.filter(q => 
+        (category === 'all_mix' || q.category === category) &&
+        (difficulty === 'All' || q.difficulty === difficulty)
+    );
 
-    const topicDescription =
-      category === 'custom' && customTopic
-        ? `Custom Topic: "${customTopic}"`
-        : category === 'breaking_news'
-        ? `Recent 2025-2026 World, Tech & Science Events (Use Google Search grounding for latest facts)`
-        : `Category: ${category}`;
+    // Shuffle and slice
+    questions = questions.sort(() => Math.random() - 0.5).slice(0, Math.min(count, questions.length));
 
-    const hostInstructions = personality
-      ? `The AI host is ${personality.name} (${personality.title}). Archetype: ${personality.archetype || 'Custom'}. Catchphrase: "${personality.catchphrase}". Bio: ${personality.bio}. System style: ${personality.systemInstruction}`
-      : 'The AI host is an engaging game show master.';
-
-    const prompt = `You are the lead question writer for a high-stakes AI-hosted trivia game show.
-${hostInstructions}
-
-TASK:
-Generate exactly ${count} unique, captivating, factually accurate multiple-choice trivia questions.
-Topic: ${topicDescription}
-Difficulty: ${normalizedDifficulty}
-${difficultyCriteria}
-
-Requirements:
-1. Verify accuracy using Google Search for real, verified facts, dates, and names.
-2. Each question MUST have exactly 4 options.
-3. Randomize the position of the correct answer among options (index 0 to 3).
-4. Provide a punchy "hostCommentary" for each question written strictly in the host's personality tone (e.g. sarcastic witty banter, enthusiastic encouraging cheer, or formal educational scholarly framing).
-5. Provide a fascinating "funFact" explaining the background.
-6. Provide a clear "explanation".
-
-You MUST return ONLY a valid JSON array matching this exact JSON structure (wrapped inside \`\`\`json and \`\`\` code fence):
-\`\`\`json
-[
-  {
-    "id": "q1",
-    "question": "Question text here?",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
-    "correctIndex": 1,
-    "correctAnswer": "Option B",
-    "explanation": "Why Option B is correct...",
-    "category": "${category}",
-    "difficulty": "${normalizedDifficulty}",
-    "hostCommentary": "Host intro strictly in character here...",
-    "funFact": "Fascinating verified fact here..."
-  }
-]
-\`\`\``;
-
-    const generateTriviaWithRetry = async (prompt: string, retries = 5, delay = 2000): Promise<any> => {
-      try {
-        return await ai.models.generateContent({
-          model: 'gemini-3.5-flash',
-          contents: prompt,
-          config: {
-            tools: [{ googleSearch: {} }],
-          },
-        });
-      } catch (error: any) {
-        if (retries > 0 && error.status === 429) {
-          console.warn(`Trivia quota exceeded, retrying in ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return generateTriviaWithRetry(prompt, retries - 1, Math.floor(delay * 1.2));
-        }
-        throw error;
-      }
-    };
-
-    const response = await generateTriviaWithRetry(prompt);
-
-    const responseText = response.text || '';
-    
-    // Extract grounding sources from Search Grounding
-    const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-    const groundingSources: { title?: string; uri?: string }[] = [];
-    
-    for (const chunk of groundingChunks) {
-      if (chunk.web?.uri) {
-        groundingSources.push({
-          title: chunk.web.title || 'Source Reference',
-          uri: chunk.web.uri,
-        });
-      }
-    }
-
-    // Parse JSON array from response
-    let jsonStr = responseText;
-    
-    // Attempt to extract JSON from markdown fence or raw array
-    const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/) || responseText.match(/\[\s*\{[\s\S]*\}\s*\]/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1] || jsonMatch[0];
-    } else {
-        // Fallback: search for first [ and last ]
-        const firstBracket = responseText.indexOf('[');
-        const lastBracket = responseText.lastIndexOf(']');
-        if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-            jsonStr = responseText.substring(firstBracket, lastBracket + 1);
-        }
-    }
-
-    let questions = [];
-    try {
-      questions = JSON.parse(jsonStr);
-    } catch (parseErr) {
-      console.error('Failed to parse JSON:', parseErr, 'Raw response:', responseText.substring(0, 500));
-      throw new Error('Failed to parse trivia questions JSON');
-    }
-
-    // Attach grounding sources to questions
-    const enrichedQuestions = questions.map((q: any, idx: number) => ({
-      id: q.id || `q_${Date.now()}_${idx}`,
-      question: q.question || 'Trivia Question',
-      options: Array.isArray(q.options) && q.options.length === 4 ? q.options : ['A', 'B', 'C', 'D'],
-      correctIndex: typeof q.correctIndex === 'number' ? q.correctIndex : 0,
-      correctAnswer: q.correctAnswer || (q.options ? q.options[q.correctIndex || 0] : 'A'),
-      explanation: q.explanation || 'Verified fact.',
-      category: q.category || category,
-      difficulty: normalizedDifficulty,
-      hostCommentary: q.hostCommentary || 'Let us see how you fare with this one!',
-      funFact: q.funFact || 'Here is an intriguing trivia detail.',
-      groundingSources: groundingSources.slice(0, 3),
-    }));
-
-    res.json({ questions: enrichedQuestions, groundingSources });
+    res.json({ questions });
   } catch (error: any) {
     console.error('Error generating trivia:', error);
     res.status(500).json({ error: error.message || 'Failed to generate trivia' });

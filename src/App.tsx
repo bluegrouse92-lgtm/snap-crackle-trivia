@@ -34,6 +34,7 @@ import {
 import { Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
 
 export default function App() {
+  const [isAppLoading, setIsAppLoading] = useState(true);
   const [personality, setPersonality] = useState<HostPersonality>(PRESET_PERSONALITIES[0]);
   const [isPersonalityModalOpen, setIsPersonalityModalOpen] = useState(false);
   const [isLiveVoiceModalOpen, setIsLiveVoiceModalOpen] = useState(false);
@@ -46,13 +47,7 @@ export default function App() {
   const [isLoadingTrivia, setIsLoadingTrivia] = useState(false);
   const [isLoadingVoice, setIsLoadingVoice] = useState(false);
   const [isLoadingLifeline, setIsLoadingLifeline] = useState(false);
-  const [selectedOption, setSelectedOption] = useState<number | null>(null);
-  const [hasAnswered, setHasAnswered] = useState(false);
-  const [timeRemaining, setTimeRemaining] = useState(25);
-  const [maxTime, setMaxTime] = useState(25);
-  const [timeSpentOnCurrent, setTimeSpentOnCurrent] = useState(0);
-  const [currentScoreBreakdown, setCurrentScoreBreakdown] = useState<ScoreBreakdown | null>(null);
-
+  
   // Mode and Coin Wallet state
   const [activeMode, setActiveMode] = useState<'single' | 'multiplayer'>('single');
   const [wallet, setWallet] = useState(getCoinWallet());
@@ -96,20 +91,36 @@ export default function App() {
 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Sync Coin Wallet & Auto-prompt daily bonus if eligible on initial visit
+  const [selectedOption, setSelectedOption] = useState<number | null>(null);
+  const [hasAnswered, setHasAnswered] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState(25);
+  const [maxTime, setMaxTime] = useState(25);
+  const [timeSpentOnCurrent, setTimeSpentOnCurrent] = useState(0);
+  const [currentScoreBreakdown, setCurrentScoreBreakdown] = useState<ScoreBreakdown | null>(null);
+  
+  // 9. Effects
   useEffect(() => {
+    // Loading timer
+    const loadingTimer = setTimeout(() => setIsAppLoading(false), 2000);
+    
+    // Sync Coin Wallet & Auto-prompt daily bonus
     const w = getCoinWallet();
     setWallet(w);
     const eligible = checkCanClaimDailyBonus();
     setCanClaimDaily(eligible);
+    let bonusTimer: NodeJS.Timeout | undefined;
     if (eligible) {
-      // Prompt daily bonus gift
-      const timer = setTimeout(() => {
+      bonusTimer = setTimeout(() => {
         setIsDailyBonusOpen(true);
       }, 1000);
-      return () => clearTimeout(timer);
     }
+    
+    return () => {
+      clearTimeout(loadingTimer);
+      if (bonusTimer) clearTimeout(bonusTimer);
+    };
   }, []);
+
 
   const refreshWallet = () => {
     setWallet(getCoinWallet());
@@ -232,37 +243,40 @@ export default function App() {
     refreshWallet();
   };
 
-  // Trigger Host Speech via TTS (gemini-3.1-flash-tts-preview)
+  // Trigger Host Speech via browser SpeechSynthesis
   const speakHostLine = async (text: string, voiceName?: string) => {
-    if (!text) return;
+    if (!text || !('speechSynthesis' in window)) return;
+    
     try {
       setIsLoadingVoice(true);
-      const res = await fetch('/api/host-tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          voice: voiceName || personality.voice,
-        }),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('TTS API error:', res.status, errorText);
-        throw new Error(`TTS API failed: ${res.status}`);
-      }
-
-      const data = await res.json();
-      setIsLoadingVoice(false);
-
-      if (data.audio) {
+      
+      // Stop current speech
+      window.speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(text);
+      
+      // Attempt to find a matching voice
+      const voices = window.speechSynthesis.getVoices();
+      const voice = voices.find(v => v.name.includes(voiceName || '')) || voices[0];
+      if (voice) utterance.voice = voice;
+      
+      utterance.onstart = () => {
         setGameState((prev) => ({ ...prev, isHostSpeaking: true }));
-        await playPcmBase64(data.audio, 24000, () => {
-          setGameState((prev) => ({ ...prev, isHostSpeaking: false }));
-        });
-      }
+        setIsLoadingVoice(false);
+      };
+      
+      utterance.onend = () => {
+        setGameState((prev) => ({ ...prev, isHostSpeaking: false }));
+      };
+      
+      utterance.onerror = () => {
+        setIsLoadingVoice(false);
+        setGameState((prev) => ({ ...prev, isHostSpeaking: false }));
+      };
+      
+      window.speechSynthesis.speak(utterance);
     } catch (err) {
-      console.error('Error generating host speech:', err);
+      console.error('Error in local TTS:', err);
       setIsLoadingVoice(false);
       setGameState((prev) => ({ ...prev, isHostSpeaking: false }));
     }
@@ -710,173 +724,182 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0518] text-white flex flex-col selection:bg-purple-500 selection:text-white font-sans relative overflow-x-hidden">
-      {/* Frosted Glass Ambient Lighting Glows */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute top-[-10%] left-[-10%] w-[45%] h-[45%] bg-purple-600/25 rounded-full blur-[140px]" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-blue-600/20 rounded-full blur-[160px]" />
-        <div className="absolute top-[30%] right-[10%] w-[35%] h-[35%] bg-pink-600/15 rounded-full blur-[120px]" />
-        <div className="absolute bottom-[25%] left-[5%] w-[30%] h-[30%] bg-cyan-600/10 rounded-full blur-[130px]" />
-      </div>
+    <>
+      {isAppLoading ? (
+        <div className="fixed inset-0 bg-[#0a0518] flex flex-col items-center justify-center gap-4 z-50">
+          <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          <h1 className="text-xl font-bold text-indigo-200">Loading Trivia Arena...</h1>
+        </div>
+      ) : (
+        <div className="min-h-screen bg-[#0a0518] text-white flex flex-col selection:bg-purple-500 selection:text-white font-sans relative overflow-x-hidden">
+        {/* Frosted Glass Ambient Lighting Glows */}
+        <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+          <div className="absolute top-[-10%] left-[-10%] w-[45%] h-[45%] bg-purple-600/25 rounded-full blur-[140px]" />
+          <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-blue-600/20 rounded-full blur-[160px]" />
+          <div className="absolute top-[30%] right-[10%] w-[35%] h-[35%] bg-pink-600/15 rounded-full blur-[120px]" />
+          <div className="absolute bottom-[25%] left-[5%] w-[30%] h-[30%] bg-cyan-600/10 rounded-full blur-[130px]" />
+        </div>
 
-      {/* Top Header */}
-      <Header
-        personality={personality}
-        score={gameState.score}
-        streak={gameState.streak}
-        difficulty={gameState.questions[0]?.difficulty}
-        roundCurrent={gameState.status === 'playing' ? gameState.currentIndex + 1 : undefined}
-        roundTotal={gameState.status === 'playing' ? gameState.questions.length : undefined}
-        isHostSpeaking={gameState.isHostSpeaking}
-        coinBalance={wallet.balance}
-        canClaimDaily={canClaimDaily}
-        onOpenDailyBonus={() => setIsDailyBonusOpen(true)}
-        onOpenMultiplayer={() => setIsMultiplayerModalOpen(true)}
-        onOpenPersonalitySelector={() => setIsPersonalityModalOpen(true)}
-        onOpenLiveVoice={() => setIsLiveVoiceModalOpen(true)}
-        onOpenLeaderboard={() => {
-          setHighlightLeaderboardId(undefined);
-          setIsLeaderboardOpen(true);
-        }}
-        onOpenGooglePlayExport={() => setIsGooglePlayExportOpen(true)}
-        onRestartGame={() => {
-          stopCurrentAudio();
-          if (activeMode === 'multiplayer') {
-            handleLeaveMultiplayer();
-          } else {
-            setGameState((prev) => ({ ...prev, status: 'setup' }));
-          }
-        }}
-        liveVoiceConnected={gameState.liveVoiceConnected}
-        autoPlayVoice={autoPlayVoice}
-        onToggleAutoPlay={() => setAutoPlayVoice(!autoPlayVoice)}
-      />
-
-      {/* Main Arena Content */}
-      <main className="h-[calc(100vh-120px)] overflow-y-auto max-w-5xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-6 relative z-10">
-        {/* MULTIPLAYER ARENA VIEW */}
-        {activeMode === 'multiplayer' ? (
-          <MultiplayerArena
-            roomState={multiplayerRoomState}
-            currentPlayerId={myPlayerId}
-            onSendAction={sendMultiplayerAction}
-            onLeaveRoom={handleLeaveMultiplayer}
-            personalities={PRESET_PERSONALITIES}
-            onOpenDailyBonus={() => setIsDailyBonusOpen(true)}
-          />
-        ) : (
-          <GameView
-            gameState={gameState}
-            personality={personality}
-            onStartGame={handleStartGame}
-            onOpenPersonalitySelector={() => setIsPersonalityModalOpen(true)}
-            onOpenDailyBonus={() => setIsDailyBonusOpen(true)}
-            isLoadingTrivia={isLoadingTrivia}
-            selectedOption={selectedOption}
-            hasAnswered={hasAnswered}
-            onSelectOption={handleSelectOption}
-            onNextQuestion={handleNextQuestion}
-            onUse5050={handleUse5050}
-            onUseHint={handleUseHint}
-            onUseSearchGrounding={handleUseSearchGrounding}
-            onToggleDoubleDown={handleToggleDoubleDown}
-            isLoadingLifeline={isLoadingLifeline}
-            timeRemaining={timeRemaining}
-            maxTime={maxTime}
-            scoreBreakdown={currentScoreBreakdown}
-            onPlayAgain={() => {
-              stopCurrentAudio();
-              refreshWallet();
-              setGameState((prev) => ({ ...prev, status: 'playing', currentIndex: 0, score: 0, answersHistory: [] }));
-            }}
-            onReturnHome={() => {
-              stopCurrentAudio();
-              refreshWallet();
-              setGameState((prev) => ({ ...prev, status: 'setup', currentIndex: 0, score: 0, answersHistory: [] }));
-            }}
-            onSelectNewHost={() => {
-              stopCurrentAudio();
-              setIsPersonalityModalOpen(true);
-            }}
-            onReplaySpeech={() => speakHostLine(gameState.hostSpeechText, personality.voice)}
-            onOpenLiveVoice={() => setIsLiveVoiceModalOpen(true)}
-            onOpenLeaderboard={(highlightId) => {
-              setHighlightLeaderboardId(highlightId);
-              setIsLeaderboardOpen(true);
-            }}
-          />
-        )}
-      </main>
-
-      {/* Host Personality Selection & Custom Host Studio Modal */}
-      {isPersonalityModalOpen && (
-        <PersonalitySelector
-          currentPersonality={personality}
-          onSelectPersonality={(newPersonality) => {
-            setPersonality(newPersonality);
-            setGameState((prev) => ({
-              ...prev,
-              hostSpeechText: newPersonality.catchphrase,
-              hostMood: 'welcoming',
-            }));
-            playSoundFX('host_intro');
-            if (autoPlayVoice) {
-              speakHostLine(newPersonality.catchphrase, newPersonality.voice);
+        {/* Top Header */}
+        <Header
+          personality={personality}
+          score={gameState.score}
+          streak={gameState.streak}
+          difficulty={gameState.questions[0]?.difficulty}
+          roundCurrent={gameState.status === 'playing' ? gameState.currentIndex + 1 : undefined}
+          roundTotal={gameState.status === 'playing' ? gameState.questions.length : undefined}
+          isHostSpeaking={gameState.isHostSpeaking}
+          coinBalance={wallet.balance}
+          canClaimDaily={canClaimDaily}
+          onOpenDailyBonus={() => setIsDailyBonusOpen(true)}
+          onOpenMultiplayer={() => setIsMultiplayerModalOpen(true)}
+          onOpenPersonalitySelector={() => setIsPersonalityModalOpen(true)}
+          onOpenLiveVoice={() => setIsLiveVoiceModalOpen(true)}
+          onOpenLeaderboard={() => {
+            setHighlightLeaderboardId(undefined);
+            setIsLeaderboardOpen(true);
+          }}
+          onOpenGooglePlayExport={() => setIsGooglePlayExportOpen(true)}
+          onRestartGame={() => {
+            stopCurrentAudio();
+            if (activeMode === 'multiplayer') {
+              handleLeaveMultiplayer();
+            } else {
+              setGameState((prev) => ({ ...prev, status: 'setup' }));
             }
           }}
-          onClose={() => setIsPersonalityModalOpen(false)}
+          liveVoiceConnected={gameState.liveVoiceConnected}
+          autoPlayVoice={autoPlayVoice}
+          onToggleAutoPlay={() => setAutoPlayVoice(!autoPlayVoice)}
         />
-      )}
 
-      {/* Daily 150 Login Bonus Modal */}
-      <DailyBonusModal
-        isOpen={isDailyBonusOpen}
-        onClose={() => {
-          setIsDailyBonusOpen(false);
-          refreshWallet();
-        }}
-        onClaimSuccess={() => refreshWallet()}
-      />
+        {/* Main Arena Content */}
+        <main className="min-h-[calc(100vh-80px)] sm:h-[calc(100vh-100px)] overflow-y-auto max-w-lg sm:max-w-3xl lg:max-w-5xl w-full mx-auto p-2 sm:p-4 lg:p-8 flex flex-col gap-4 sm:gap-6 relative z-10">
+          {/* MULTIPLAYER ARENA VIEW */}
+          {activeMode === 'multiplayer' ? (
+            <MultiplayerArena
+              roomState={multiplayerRoomState}
+              currentPlayerId={myPlayerId}
+              onSendAction={sendMultiplayerAction}
+              onLeaveRoom={handleLeaveMultiplayer}
+              personalities={PRESET_PERSONALITIES}
+              onOpenDailyBonus={() => setIsDailyBonusOpen(true)}
+            />
+          ) : (
+            <GameView
+              gameState={gameState}
+              personality={personality}
+              onStartGame={handleStartGame}
+              onOpenPersonalitySelector={() => setIsPersonalityModalOpen(true)}
+              onOpenDailyBonus={() => setIsDailyBonusOpen(true)}
+              isLoadingTrivia={isLoadingTrivia}
+              selectedOption={selectedOption}
+              hasAnswered={hasAnswered}
+              onSelectOption={handleSelectOption}
+              onNextQuestion={handleNextQuestion}
+              onUse5050={handleUse5050}
+              onUseHint={handleUseHint}
+              onUseSearchGrounding={handleUseSearchGrounding}
+              onToggleDoubleDown={handleToggleDoubleDown}
+              isLoadingLifeline={isLoadingLifeline}
+              timeRemaining={timeRemaining}
+              maxTime={maxTime}
+              scoreBreakdown={currentScoreBreakdown}
+              onPlayAgain={() => {
+                stopCurrentAudio();
+                refreshWallet();
+                setGameState((prev) => ({ ...prev, status: 'playing', currentIndex: 0, score: 0, answersHistory: [] }));
+              }}
+              onReturnHome={() => {
+                stopCurrentAudio();
+                refreshWallet();
+                setGameState((prev) => ({ ...prev, status: 'setup', currentIndex: 0, score: 0, answersHistory: [] }));
+              }}
+              onSelectNewHost={() => {
+                stopCurrentAudio();
+                setIsPersonalityModalOpen(true);
+              }}
+              onReplaySpeech={() => speakHostLine(gameState.hostSpeechText, personality.voice)}
+              onOpenLiveVoice={() => setIsLiveVoiceModalOpen(true)}
+              onOpenLeaderboard={(highlightId) => {
+                setHighlightLeaderboardId(highlightId);
+                setIsLeaderboardOpen(true);
+              }}
+            />
+          )}
+        </main>
 
-      {/* Multiplayer Join & Matchmaking Modal */}
-      <MultiplayerJoinModal
-        isOpen={isMultiplayerModalOpen}
-        onClose={() => setIsMultiplayerModalOpen(false)}
-        onCreateRoom={handleCreateMultiplayerRoom}
-        onJoinRoom={handleJoinMultiplayerRoom}
-        onQuickMatch={handleQuickMatch}
-        personalities={PRESET_PERSONALITIES}
-        onOpenDailyBonus={() => {
-          setIsMultiplayerModalOpen(false);
-          setIsDailyBonusOpen(true);
-        }}
-      />
+        {/* Host Personality Selection & Custom Host Studio Modal */}
+        {isPersonalityModalOpen && (
+          <PersonalitySelector
+            currentPersonality={personality}
+            onSelectPersonality={(newPersonality) => {
+              setPersonality(newPersonality);
+              setGameState((prev) => ({
+                ...prev,
+                hostSpeechText: newPersonality.catchphrase,
+                hostMood: 'welcoming',
+              }));
+              playSoundFX('host_intro');
+              if (autoPlayVoice) {
+                speakHostLine(newPersonality.catchphrase, newPersonality.voice);
+              }
+            }}
+            onClose={() => setIsPersonalityModalOpen(false)}
+          />
+        )}
 
-      {/* Hall of Fame Leaderboard Modal */}
-      {isLeaderboardOpen && (
-        <LeaderboardModal
-          highlightEntryId={highlightLeaderboardId}
-          onClose={() => setIsLeaderboardOpen(false)}
+        {/* Daily 150 Login Bonus Modal */}
+        <DailyBonusModal
+          isOpen={isDailyBonusOpen}
+          onClose={() => {
+            setIsDailyBonusOpen(false);
+            refreshWallet();
+          }}
+          onClaimSuccess={() => refreshWallet()}
         />
+
+        {/* Multiplayer Join & Matchmaking Modal */}
+        <MultiplayerJoinModal
+          isOpen={isMultiplayerModalOpen}
+          onClose={() => setIsMultiplayerModalOpen(false)}
+          onCreateRoom={handleCreateMultiplayerRoom}
+          onJoinRoom={handleJoinMultiplayerRoom}
+          onQuickMatch={handleQuickMatch}
+          personalities={PRESET_PERSONALITIES}
+          onOpenDailyBonus={() => {
+            setIsMultiplayerModalOpen(false);
+            setIsDailyBonusOpen(true);
+          }}
+        />
+
+        {/* Hall of Fame Leaderboard Modal */}
+        {isLeaderboardOpen && (
+          <LeaderboardModal
+            highlightEntryId={highlightLeaderboardId}
+            onClose={() => setIsLeaderboardOpen(false)}
+          />
+        )}
+
+        {/* Google Play Store Export & Packaging Modal */}
+        <GooglePlayExportModal
+          isOpen={isGooglePlayExportOpen}
+          onClose={() => setIsGooglePlayExportOpen(false)}
+        />
+
+        {/* Gemini Live API Real-Time Voice Modal */}
+        <LiveVoiceModal
+          personality={personality}
+          currentQuestion={
+            gameState.status === 'playing' && gameState.questions[gameState.currentIndex]
+              ? gameState.questions[gameState.currentIndex]
+              : undefined
+          }
+          isOpen={isLiveVoiceModalOpen}
+          onClose={() => setIsLiveVoiceModalOpen(false)}
+        />
+      </div>
       )}
-
-      {/* Google Play Store Export & Packaging Modal */}
-      <GooglePlayExportModal
-        isOpen={isGooglePlayExportOpen}
-        onClose={() => setIsGooglePlayExportOpen(false)}
-      />
-
-      {/* Gemini Live API Real-Time Voice Modal */}
-      <LiveVoiceModal
-        personality={personality}
-        currentQuestion={
-          gameState.status === 'playing' && gameState.questions[gameState.currentIndex]
-            ? gameState.questions[gameState.currentIndex]
-            : undefined
-        }
-        isOpen={isLiveVoiceModalOpen}
-        onClose={() => setIsLiveVoiceModalOpen(false)}
-      />
-    </div>
+    </>
   );
 }
