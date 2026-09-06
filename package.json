@@ -1,7 +1,7 @@
 {
   "name": "snap-crackle-trivia",
   "version": "1.0.0",
-  "description": "Snap Crackle Pop Trivia! 💥⚡🍿 - An electrifying arcade game-show trivia experience featuring reactive AI hosts, 3-tier question generation, voice narration, high-stakes wagering, streak multipliers, and real-time multiplayer.",
+  "description": "Snap Crackle Pop Trivia! 💥⚡🍿 - High-energy arcade game-show trivia featuring reactive AI hosts, a local 500-question weekly bank refreshed via Google, voice narration, wagering, streak multipliers, and real-time multiplayer.",
   "keywords": [
     "trivia",
     "game-show",
