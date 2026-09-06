@@ -677,7 +677,7 @@ async function start() {
   }
 
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`PersonaTrivia server listening on http://0.0.0.0:${PORT}`);
+    console.log(`💥⚡🍿 Snap Crackle Pop Trivia server listening on http://0.0.0.0:${PORT}`);
   });
 }
 

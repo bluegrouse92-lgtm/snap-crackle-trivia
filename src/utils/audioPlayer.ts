@@ -1,5 +1,5 @@
 /**
- * Audio Player & Sound FX Engine for PersonaTrivia AI
+ * Audio Player & Sound FX Engine for Snap Crackle Pop Trivia 💥⚡🍿
  * Handles 24kHz PCM playback for Gemini TTS and Gemini Live,
  * 16kHz PCM recording for Live API, and Web Audio synthesized SFX.
  */

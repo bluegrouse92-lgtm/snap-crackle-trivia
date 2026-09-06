@@ -1,7 +1,8 @@
 import { CoinWallet, MatchCoinReward } from '../types';
 import { playSoundFX } from './audioPlayer';
 
-const COIN_WALLET_KEY = 'personatrivia_coin_wallet';
+const COIN_WALLET_KEY = 'snap_crackle_pop_coin_wallet';
+const LEGACY_COIN_WALLET_KEY = 'personatrivia_coin_wallet';
 const DEFAULT_INITIAL_BALANCE = 500;
 const DAILY_LOGIN_BASE_REWARD = 150;
 
@@ -21,7 +22,7 @@ export function getTodayDateString(): string {
  */
 export function getCoinWallet(): CoinWallet {
   try {
-    const raw = localStorage.getItem(COIN_WALLET_KEY);
+    const raw = localStorage.getItem(COIN_WALLET_KEY) || localStorage.getItem(LEGACY_COIN_WALLET_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       return {

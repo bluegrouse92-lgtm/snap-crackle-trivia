@@ -1,8 +1,8 @@
 {
   "id": "/?source=pwa",
-  "name": "PersonaTrivia AI - Game Show",
-  "short_name": "PersonaTrivia",
-  "description": "Interactive AI Game Show Trivia with Voice, Dynamic Personalities, Multiplayer Arena, and Grounded News",
+  "name": "Snap Crackle Pop Trivia! 💥⚡🍿",
+  "short_name": "SnapCracklePop",
+  "description": "Electrifying arcade game-show trivia featuring reactive AI hosts, 3-tier question generation, voice narration, wagering, and real-time multiplayer arena!",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

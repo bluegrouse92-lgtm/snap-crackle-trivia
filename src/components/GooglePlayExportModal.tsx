@@ -55,7 +55,7 @@ npm install
 npm install @capacitor/core @capacitor/cli @capacitor/android
 
 # 3. Initialize your Android package
-npx cap init "PersonaTrivia AI" "com.personatrivia.app" --web-dir=dist
+npx cap init "Snap Crackle Trivia" "com.bluegrouse.trivia" --web-dir=dist
 
 # 4. Build Vite production bundle and sync Android platform
 npm run build
@@ -90,7 +90,7 @@ npx cap open android`;
                   </span>
                 </h2>
                 <p className="text-xs text-slate-300 mt-0.5">
-                  Package and publish PersonaTrivia AI to Android devices & Google Play Console
+                  Package and publish Snap Crackle Pop Trivia to Android devices & Google Play Console
                 </p>
               </div>
             </div>
@@ -261,7 +261,7 @@ npx cap open android`;
                     <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center shrink-0 text-[10px]">1</span>
                     <div>
                       <span className="font-semibold text-slate-100 block">Create App in Google Play Console</span>
-                      <span className="text-slate-400">Set title to "PersonaTrivia AI", select Category: Game &gt; Trivia.</span>
+                      <span className="text-slate-400">Set title to "Snap Crackle Pop Trivia", select Category: Game &gt; Trivia.</span>
                     </div>
                   </div>
 

@@ -1,5 +1,5 @@
-// Service Worker for PersonaTrivia AI PWA / Google Play TWA
-const CACHE_NAME = 'personatrivia-v1';
+// Service Worker for Snap Crackle Pop Trivia PWA
+const CACHE_NAME = 'snap-crackle-pop-v1';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
