@@ -84,6 +84,14 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-6xl mx-auto flex items-center justify-between gap-2 sm:gap-3">
         {/* Left: Brand & Host Profile Badge */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Snap Crackle Pop Brand Logo Badge */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-2xl bg-gradient-to-r from-amber-500/20 via-rose-500/20 to-purple-600/20 border border-amber-400/35 shadow-sm">
+            <span className="text-sm sm:text-base select-none">💥</span>
+            <span className="font-black tracking-tight text-xs sm:text-sm bg-gradient-to-r from-amber-300 via-rose-300 to-pink-300 bg-clip-text text-transparent font-sans uppercase hidden xs:inline">
+              Snap Crackle Pop
+            </span>
+          </div>
+
           <button
             id="header-personality-btn"
             onClick={onOpenPersonalitySelector}

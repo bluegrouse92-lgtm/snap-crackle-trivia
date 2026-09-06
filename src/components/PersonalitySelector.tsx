@@ -56,12 +56,41 @@ export const PersonalitySelector: React.FC<PersonalitySelectorProps> = ({
       const data = await res.json();
       if (data.audio) {
         await playPcmBase64(data.audio, 24000, () => setTestingVoiceId(null));
+      } else if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(`Greetings! I am ${p.name}. ${p.catchphrase}`);
+        if (p.id === 'sunny') {
+          utterance.pitch = 1.25;
+          utterance.rate = 1.1;
+        } else if (p.id === 'roxy') {
+          utterance.pitch = 1.05;
+          utterance.rate = 1.15;
+        } else if (p.id === 'sterling') {
+          utterance.pitch = 0.9;
+          utterance.rate = 0.95;
+        } else if (p.id === 'unit74') {
+          utterance.pitch = 0.75;
+          utterance.rate = 1.05;
+        } else if (p.id === 'sage') {
+          utterance.pitch = 0.95;
+          utterance.rate = 0.9;
+        }
+        utterance.onend = () => setTestingVoiceId(null);
+        utterance.onerror = () => setTestingVoiceId(null);
+        window.speechSynthesis.speak(utterance);
       } else {
         setTestingVoiceId(null);
       }
     } catch (err) {
-      console.error('Error testing voice:', err);
-      setTestingVoiceId(null);
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(`Greetings! I am ${p.name}. ${p.catchphrase}`);
+        utterance.onend = () => setTestingVoiceId(null);
+        utterance.onerror = () => setTestingVoiceId(null);
+        window.speechSynthesis.speak(utterance);
+      } else {
+        setTestingVoiceId(null);
+      }
     }
   };
 

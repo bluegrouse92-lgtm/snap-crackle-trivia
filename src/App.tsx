@@ -52,6 +52,7 @@ export default function App() {
   const [activeMode, setActiveMode] = useState<'single' | 'multiplayer'>('single');
   const [wallet, setWallet] = useState(getCoinWallet());
   const [canClaimDaily, setCanClaimDaily] = useState(checkCanClaimDailyBonus());
+  const [lastGameSettings, setLastGameSettings] = useState<GameSettings | null>(null);
 
   // Multiplayer State
   const [multiplayerRoomState, setMultiplayerRoomState] = useState<MultiplayerRoomState | null>(null);
@@ -243,37 +244,82 @@ export default function App() {
     refreshWallet();
   };
 
-  // Trigger Host Speech via browser SpeechSynthesis
+  // Trigger Host Speech via Dual Engine (Gemini Flash TTS -> Local Web Speech Fallback)
   const speakHostLine = async (text: string, voiceName?: string) => {
-    if (!text || !('speechSynthesis' in window)) return;
-    
+    if (!text) return;
+    setIsLoadingVoice(true);
+
+    // Try Gemini TTS first if available
     try {
-      setIsLoadingVoice(true);
-      
-      // Stop current speech
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2000);
+      const res = await fetch('/api/host-tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice: voiceName || personality.voice }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.audio) {
+          setGameState((prev) => ({ ...prev, isHostSpeaking: true }));
+          setIsLoadingVoice(false);
+          await playPcmBase64(data.audio, 24000, () => {
+            setGameState((prev) => ({ ...prev, isHostSpeaking: false }));
+          });
+          return;
+        }
+      }
+    } catch {
+      // Fall through to browser speech synthesis
+    }
+
+    if (!('speechSynthesis' in window)) {
+      setIsLoadingVoice(false);
+      return;
+    }
+
+    try {
       window.speechSynthesis.cancel();
-      
       const utterance = new SpeechSynthesisUtterance(text);
-      
-      // Attempt to find a matching voice
       const voices = window.speechSynthesis.getVoices();
-      const voice = voices.find(v => v.name.includes(voiceName || '')) || voices[0];
+      const voice = voices.find((v) => v.name.includes(voiceName || personality.voice)) || voices[0];
       if (voice) utterance.voice = voice;
-      
+
+      // Character-tuned pitch and rate
+      if (personality.id === 'sunny') {
+        utterance.pitch = 1.25;
+        utterance.rate = 1.1;
+      } else if (personality.id === 'roxy') {
+        utterance.pitch = 1.05;
+        utterance.rate = 1.15;
+      } else if (personality.id === 'sterling') {
+        utterance.pitch = 0.9;
+        utterance.rate = 0.95;
+      } else if (personality.id === 'unit74') {
+        utterance.pitch = 0.75;
+        utterance.rate = 1.05;
+      } else if (personality.id === 'sage') {
+        utterance.pitch = 0.95;
+        utterance.rate = 0.9;
+      }
+
       utterance.onstart = () => {
         setGameState((prev) => ({ ...prev, isHostSpeaking: true }));
         setIsLoadingVoice(false);
       };
-      
+
       utterance.onend = () => {
         setGameState((prev) => ({ ...prev, isHostSpeaking: false }));
       };
-      
+
       utterance.onerror = () => {
         setIsLoadingVoice(false);
         setGameState((prev) => ({ ...prev, isHostSpeaking: false }));
       };
-      
+
       window.speechSynthesis.speak(utterance);
     } catch (err) {
       console.error('Error in local TTS:', err);
@@ -281,6 +327,7 @@ export default function App() {
       setGameState((prev) => ({ ...prev, isHostSpeaking: false }));
     }
   };
+
 
   // Start new match
   const handleStartGame = async (settings: GameSettings) => {
@@ -341,6 +388,8 @@ export default function App() {
       const firstQ = questions[0];
       const initialSpeech = firstQ.hostCommentary || `Welcome, contenders! Let us begin our battle of wits with question number one.`;
 
+      setLastGameSettings(settings);
+
       setGameState({
         mode: settings.isSinglePlayer ? 'single' : 'multiplayer',
         status: 'playing',
@@ -365,6 +414,7 @@ export default function App() {
         isHostSpeaking: false,
         liveVoiceConnected: false,
         currentWager: settings.betAmount,
+        settings,
       });
 
       setSelectedOption(null);
@@ -808,13 +858,39 @@ export default function App() {
               onPlayAgain={() => {
                 stopCurrentAudio();
                 refreshWallet();
-                setGameState((prev) => ({ ...prev, status: 'playing', currentIndex: 0, score: 0, answersHistory: [] }));
+                if (lastGameSettings) {
+                  handleStartGame(lastGameSettings);
+                } else {
+                  setGameState((prev) => ({ ...prev, status: 'setup' }));
+                }
               }}
               onReturnHome={() => {
                 stopCurrentAudio();
                 refreshWallet();
-                setGameState((prev) => ({ ...prev, status: 'setup', currentIndex: 0, score: 0, answersHistory: [] }));
+                setSelectedOption(null);
+                setHasAnswered(false);
+                setCurrentScoreBreakdown(null);
+                setGameState((prev) => ({
+                  ...prev,
+                  status: 'setup',
+                  currentIndex: 0,
+                  score: 0,
+                  streak: 0,
+                  highestStreak: 0,
+                  answersHistory: [],
+                  eliminatedOptions: [],
+                  currentHint: null,
+                  currentSearchFact: null,
+                  lifelines: {
+                    fiftyFiftyUsed: false,
+                    hintUsed: false,
+                    searchUsed: false,
+                    doubleDownActive: false,
+                    doubleDownUsed: false,
+                  },
+                }));
               }}
+
               onSelectNewHost={() => {
                 stopCurrentAudio();
                 setIsPersonalityModalOpen(true);

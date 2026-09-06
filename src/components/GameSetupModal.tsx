@@ -47,7 +47,6 @@ export const GameSetupModal: React.FC<GameSetupModalProps> = ({
   const [isSinglePlayer, setIsSinglePlayer] = useState<boolean>(true);
   const [wager, setWager] = useState<number>(50);
   const [wallet, setWallet] = useState(getCoinWallet());
-  const [step, setStep] = useState<'basics' | 'advanced'>('basics');
 
   const getCategoryIcon = (iconName: string) => {
     switch (iconName) {
@@ -165,113 +164,138 @@ export const GameSetupModal: React.FC<GameSetupModalProps> = ({
           </button>
         </div>
 
-        {step === 'basics' ? (
-          <>
-            {/* 1. Category / Topic Selection */}
-            <div>
-              <label className="block text-sm font-bold text-white font-sans mb-3">
-                1. Choose Trivia Category
-              </label>
-              <div className="relative">
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl bg-white/[0.04] border border-white/10 text-white focus:outline-none focus:border-purple-400 font-sans appearance-none"
+        {/* Step 1: Interactive Category Selection Grid */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <label className="block text-sm font-bold text-white font-sans flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-amber-500/20 text-amber-300 flex items-center justify-center text-xs font-mono font-black border border-amber-500/40">1</span>
+              <span>Choose Your Showdown Category</span>
+            </label>
+            <span className="text-xs text-white/50 font-mono hidden sm:inline">Tap any category card</span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+            {TRIVIA_CATEGORIES.map((cat) => {
+              const isSelected = selectedCategory === cat.id;
+              return (
+                <button
+                  type="button"
+                  key={cat.id}
+                  id={`cat-card-${cat.id}`}
+                  onClick={() => setSelectedCategory(cat.id)}
+                  className={`p-3.5 rounded-2xl border text-left transition-all flex flex-col justify-between gap-2.5 relative group overflow-hidden ${
+                    isSelected
+                      ? 'bg-gradient-to-b from-purple-500/25 to-pink-500/20 border-purple-400 ring-2 ring-purple-400/40 shadow-lg shadow-purple-500/25'
+                      : 'bg-white/[0.04] border-white/10 hover:bg-white/[0.08] hover:border-white/20'
+                  }`}
                 >
-                  {TRIVIA_CATEGORIES.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
+                  <div className="flex items-center justify-between">
+                    <div className={`p-2 rounded-xl ${isSelected ? 'bg-purple-500/30 text-white' : 'bg-white/10 text-purple-300'}`}>
+                      {getCategoryIcon(cat.icon)}
+                    </div>
+                    {isSelected && (
+                      <span className="w-2 h-2 rounded-full bg-purple-400 animate-ping" />
+                    )}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-xs sm:text-sm text-white group-hover:text-purple-200 transition-colors leading-snug">
                       {cat.name}
-                    </option>
-                  ))}
-                  <option value="custom">Custom Topic</option>
-                </select>
-                <div className="absolute right-4 top-3.5 pointer-events-none">
-                  <svg className="w-5 h-5 text-white/50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                </div>
-              </div>
-              
-              {/* Custom Search Topic Input */}
-              {selectedCategory === 'custom' && (
-                <div className="mt-3.5 p-4 rounded-2xl bg-white/[0.04] border border-cyan-500/40 backdrop-blur-xl animate-fadeIn">
-                  <label className="block text-xs font-bold text-cyan-300 mb-1.5 flex items-center gap-1.5">
-                    <Search className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Specify Any Custom Obsession or Niche Search Grounded Topic:</span>
-                  </label>
-                  <input
-                    type="text"
-                    id="custom-topic-input"
-                    placeholder="e.g. James Webb Space Telescope discoveries, 90s Anime Classics, Formula 1 2025"
-                    value={customTopic}
-                    onChange={(e) => setCustomTopic(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl bg-black/40 border border-white/15 text-sm text-white focus:outline-none focus:border-cyan-400 font-sans backdrop-blur-md"
-                  />
-                </div>
-              )}
-            </div>
+                    </h4>
+                    <p className="text-[10px] text-white/60 line-clamp-2 mt-1 leading-relaxed hidden sm:block">
+                      {cat.desc}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
 
-            <button
-              type="button"
-              onClick={() => setStep('advanced')}
-              className="w-full py-4 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-lg transition-all flex items-center justify-center gap-2"
-            >
-              Next: Match Settings <ArrowRight className="w-5 h-5" />
-            </button>
-          </>
-        ) : (
-          <>
-            {/* 2. Difficulty Level Selection (Easy, Medium, Hard) */}
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <label className="block text-sm font-bold text-white font-sans">
-                  2. Select Difficulty Level
-                </label>
-                <span className="text-xs text-white/50 font-mono">
-                  Higher tiers yield greater base points & leaderboard standing
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                {difficultyTiers.map((tier) => {
-                  const isSelected = difficulty === tier.level;
-                  return (
-                    <button
-                      type="button"
-                      key={tier.level}
-                      id={`difficulty-${tier.level.toLowerCase()}-btn`}
-                      onClick={() => setDifficulty(tier.level)}
-                      className={`p-4 rounded-2xl border-2 text-left transition-all flex flex-col justify-between gap-3 backdrop-blur-lg relative ${
-                        isSelected
-                          ? `${tier.bgActive} ${tier.borderActive} shadow-lg`
-                          : 'bg-white/[0.04] border-white/10 hover:bg-white/[0.08] hover:border-white/20'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className={`text-xs px-2.5 py-0.5 rounded-full border font-mono font-bold ${tier.badgeColor}`}>
-                          {tier.title}
-                        </span>
-                        <span className="text-xs font-mono font-bold text-white/90">
-                          {tier.basePoints}
-                        </span>
-                      </div>
-                      <div>
-                        <h4 className="text-base font-extrabold text-white">
-                          {tier.title} Level
-                        </h4>
-                        <p className="text-xs text-white/70 mt-1 leading-relaxed">
-                          {tier.description}
-                        </p>
-                      </div>
-                      {isSelected && (
-                        <div className="flex items-center gap-1.5 text-xs text-white font-semibold pt-2 border-t border-white/10">
-                          <Check className="w-3.5 h-3.5 text-purple-300" />
-                          <span>Selected Tier</span>
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
+          {/* Custom Search Topic Input & Inspiration Chips */}
+          {selectedCategory === 'custom' && (
+            <div className="mt-3.5 p-4 sm:p-5 rounded-2xl bg-white/[0.04] border border-cyan-500/40 backdrop-blur-xl animate-fadeIn space-y-3">
+              <label className="block text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                <Search className="w-4 h-4 text-cyan-400" />
+                <span>Specify Any Custom Topic or Obsession:</span>
+              </label>
+              <input
+                type="text"
+                id="custom-topic-input"
+                placeholder="e.g. 90s Retro Video Games, Quantum Physics, Formula 1 Champions"
+                value={customTopic}
+                onChange={(e) => setCustomTopic(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl bg-black/50 border border-white/20 text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-cyan-400 font-sans backdrop-blur-md"
+              />
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[10px] text-cyan-300/70 font-mono">Quick Suggestions:</span>
+                {['James Webb Space Telescope', 'Classic 90s Gaming', 'Ancient Roman Dynasties', 'Modern AI Inventions'].map((suggestion) => (
+                  <button
+                    type="button"
+                    key={suggestion}
+                    onClick={() => setCustomTopic(suggestion)}
+                    className="text-[10px] px-2 py-0.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-200 transition-all font-sans"
+                  >
+                    + {suggestion}
+                  </button>
+                ))}
               </div>
             </div>
+          )}
+        </div>
+
+        {/* Step 2: Difficulty Level Selection */}
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <label className="block text-sm font-bold text-white font-sans flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-purple-500/20 text-purple-300 flex items-center justify-center text-xs font-mono font-black border border-purple-500/40">2</span>
+              <span>Select Difficulty Level</span>
+            </label>
+            <span className="text-xs text-white/50 font-mono hidden sm:inline">
+              Higher tiers yield greater base points
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {difficultyTiers.map((tier) => {
+              const isSelected = difficulty === tier.level;
+              return (
+                <button
+                  type="button"
+                  key={tier.level}
+                  id={`difficulty-${tier.level.toLowerCase()}-btn`}
+                  onClick={() => setDifficulty(tier.level)}
+                  className={`p-4 rounded-2xl border-2 text-left transition-all flex flex-col justify-between gap-3 backdrop-blur-lg relative ${
+                    isSelected
+                      ? `${tier.bgActive} ${tier.borderActive} shadow-lg`
+                      : 'bg-white/[0.04] border-white/10 hover:bg-white/[0.08] hover:border-white/20'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className={`text-xs px-2.5 py-0.5 rounded-full border font-mono font-bold ${tier.badgeColor}`}>
+                      {tier.title}
+                    </span>
+                    <span className="text-xs font-mono font-bold text-white/90">
+                      {tier.basePoints}
+                    </span>
+                  </div>
+                  <div>
+                    <h4 className="text-base font-extrabold text-white">
+                      {tier.title} Level
+                    </h4>
+                    <p className="text-xs text-white/70 mt-1 leading-relaxed">
+                      {tier.description}
+                    </p>
+                  </div>
+                  {isSelected && (
+                    <div className="flex items-center gap-1.5 text-xs text-white font-semibold pt-2 border-t border-white/10">
+                      <Check className="w-3.5 h-3.5 text-purple-300" />
+                      <span>Selected Tier</span>
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
             {/* 3. Match Coin Wager */}
             <div>
@@ -397,35 +421,26 @@ export const GameSetupModal: React.FC<GameSetupModalProps> = ({
             </div>
 
             {/* Start Game Action Button */}
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => setStep('basics')}
-                className="py-4 px-6 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold"
-              >
-                Back
-              </button>
+            <div className="pt-2">
               <button
                 type="submit"
                 disabled={isLoading || (selectedCategory === 'custom' && !customTopic.trim())}
                 id="start-trivia-match-btn"
-                className="flex-1 py-4 rounded-2xl bg-gradient-to-r from-purple-500 via-fuchsia-500 to-pink-500 hover:from-purple-400 hover:to-pink-400 text-white font-black text-lg sm:text-xl shadow-xl shadow-purple-500/30 hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-4 rounded-2xl bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 hover:from-amber-400 hover:to-purple-500 text-white font-black text-lg sm:text-xl shadow-xl shadow-purple-500/30 hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? (
                   <>
                     <span className="w-5 h-5 border-3 border-white border-t-transparent rounded-full animate-spin" />
-                    <span>Generating {difficulty} Search-Grounded Trivia...</span>
+                    <span>Spinning Up {difficulty} Questions...</span>
                   </>
                 ) : (
                   <>
-                    <span>Begin {difficulty} Match</span>
-                    <ArrowRight className="w-5 h-5" />
+                    <span>💥 LAUNCH SNAP CRACKLE POP TRIVIA 🚀</span>
+                    <ArrowRight className="w-6 h-6" />
                   </>
                 )}
               </button>
             </div>
-          </>
-        )}
       </form>
     </div>
   );

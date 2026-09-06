@@ -272,10 +272,10 @@ export const TriviaQuestionCard: React.FC<TriviaQuestionCardProps> = ({
             buttonStyle = 'bg-white/[0.02] border-white/5 text-white/20 cursor-not-allowed opacity-30';
           } else if (hasAnswered) {
             if (isCorrect) {
-              buttonStyle = 'bg-emerald-500/20 border-emerald-400/80 text-emerald-100 ring-2 ring-emerald-400/40 shadow-lg shadow-emerald-500/20';
+              buttonStyle = 'bg-emerald-500/20 border-emerald-400/80 text-emerald-100 ring-2 ring-emerald-400/40 shadow-lg shadow-emerald-500/20 animate-pop-pulse';
               icon = <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />;
             } else if (isSelected) {
-              buttonStyle = 'bg-rose-500/20 border-rose-400/80 text-rose-100 ring-2 ring-rose-400/40 shadow-lg shadow-rose-500/20';
+              buttonStyle = 'bg-rose-500/20 border-rose-400/80 text-rose-100 ring-2 ring-rose-400/40 shadow-lg shadow-rose-500/20 animate-shake';
               icon = <XCircle className="w-5 h-5 text-rose-400 shrink-0" />;
             } else {
               buttonStyle = 'bg-white/[0.02] border-white/5 text-white/40 opacity-50';
@@ -290,7 +290,7 @@ export const TriviaQuestionCard: React.FC<TriviaQuestionCardProps> = ({
               id={`trivia-option-${idx}`}
               onClick={() => !isEliminated && !hasAnswered && onSelectOption(idx)}
               disabled={isEliminated || hasAnswered}
-              className={`p-4 rounded-2xl border-2 text-left font-sans transition-all flex items-center justify-between gap-3 group relative overflow-hidden ${buttonStyle}`}
+              className={`p-4 rounded-2xl border-2 text-left font-sans transition-all flex items-center justify-between gap-3 group relative overflow-hidden active:scale-[0.99] ${buttonStyle}`}
             >
               <div className="flex items-center gap-3.5">
                 <span
@@ -310,7 +310,14 @@ export const TriviaQuestionCard: React.FC<TriviaQuestionCardProps> = ({
                   {option}
                 </span>
               </div>
-              {icon}
+              <div className="flex items-center gap-2">
+                {!hasAnswered && !isEliminated && (
+                  <span className="hidden sm:inline text-[10px] text-white/30 font-mono border border-white/10 px-1.5 py-0.5 rounded">
+                    Key {idx + 1}
+                  </span>
+                )}
+                {icon}
+              </div>
             </button>
           );
         })}

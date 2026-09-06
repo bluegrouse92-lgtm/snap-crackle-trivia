@@ -47,7 +47,7 @@ export const GameOverSummary: React.FC<GameOverSummaryProps> = ({
   const accuracyPct = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
   const difficulty = state.questions[0]?.difficulty || 'Medium';
   const category = state.questions[0]?.category || 'all_mix';
-  const wager = state.settings.betAmount || 0;
+  const wager = state.settings?.betAmount ?? state.currentWager ?? 0;
 
   // Leaderboard submission state
   const [playerName, setPlayerName] = useState(() => {

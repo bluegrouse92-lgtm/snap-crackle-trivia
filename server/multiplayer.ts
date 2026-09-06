@@ -1,5 +1,6 @@
 import { WebSocket } from 'ws';
 import { GoogleGenAI } from '@google/genai';
+import { TRIVIA_QUESTIONS } from './trivia';
 
 interface MultiplayerPlayer {
   id: string;
@@ -811,7 +812,7 @@ You MUST return ONLY a valid JSON array matching this exact JSON structure:
     }));
   } catch (err) {
     console.error('Error fetching questions for multiplayer room, using fallback questions:', err);
-    room.questions = generateFallbackQuestions(room.settings.difficulty, room.settings.roundCount);
+    room.questions = generateFallbackQuestions(room.settings.difficulty, room.settings.roundCount, room.settings.category);
   }
 }
 
@@ -963,81 +964,18 @@ function endMatch(room: MultiplayerRoom) {
   broadcastRoomState(room);
 }
 
-function generateFallbackQuestions(difficulty: 'Easy' | 'Medium' | 'Hard', count: number): TriviaQuestion[] {
-  const pool = [
-    {
-      id: 'fb1',
-      question: 'Which planetary body is known as the "Red Planet"?',
-      options: ['Venus', 'Mars', 'Jupiter', 'Mercury'],
-      correctIndex: 1,
-      correctAnswer: 'Mars',
-      explanation: 'Mars appears red due to iron oxide (rust) on its surface rocks and dust.',
-      category: 'science_nature',
-      difficulty: 'Easy' as const,
-      hostCommentary: 'Let us start with a cosmic classic!',
-      funFact: 'Mars has the largest volcano in the Solar System, Olympus Mons.',
-    },
-    {
-      id: 'fb2',
-      question: 'What is the chemical symbol for Gold on the Periodic Table?',
-      options: ['Ag', 'Au', 'Fe', 'Gd'],
-      correctIndex: 1,
-      correctAnswer: 'Au',
-      explanation: 'Au comes from the Latin word for gold, "aurum", meaning shining dawn.',
-      category: 'science_nature',
-      difficulty: 'Easy' as const,
-      hostCommentary: 'Pure elemental knowledge on the line!',
-      funFact: 'All the gold ever mined worldwide could fit in a cube just 22 meters on each side.',
-    },
-    {
-      id: 'fb3',
-      question: 'In what year did the Apollo 11 mission first land humans on the Moon?',
-      options: ['1967', '1969', '1971', '1973'],
-      correctIndex: 1,
-      correctAnswer: '1969',
-      explanation: 'Neil Armstrong and Buzz Aldrin landed the Apollo 11 Lunar Module Eagle on July 20, 1969.',
-      category: 'world_history',
-      difficulty: 'Medium' as const,
-      hostCommentary: 'One small step for a contender, one giant leap for the scoreboard!',
-      funFact: 'The original Apollo guidance computer had just 4 kilobytes of RAM.',
-    },
-    {
-      id: 'fb4',
-      question: 'Which of the following ocean trenches is the deepest known location on Earth?',
-      options: ['Java Trench', 'Puerto Rico Trench', 'Mariana Trench', 'Tonga Trench'],
-      correctIndex: 2,
-      correctAnswer: 'Mariana Trench',
-      explanation: 'The Challenger Deep in the Mariana Trench reaches approximately 10,994 meters deep.',
-      category: 'geography_wonders',
-      difficulty: 'Medium' as const,
-      hostCommentary: 'Diving deep into the abyss for this point!',
-      funFact: 'Pressure at the bottom of the Mariana Trench exceeds 1,000 times atmospheric pressure at sea level.',
-    },
-    {
-      id: 'fb5',
-      question: 'Which ancient wonder was located in Alexandria, Egypt and guided ships for centuries?',
-      options: ['Colossus of Rhodes', 'Lighthouse of Alexandria', 'Mausoleum at Halicarnassus', 'Hanging Gardens'],
-      correctIndex: 1,
-      correctAnswer: 'Lighthouse of Alexandria',
-      explanation: 'The Pharos of Alexandria stood over 100 meters tall on the island of Pharos.',
-      category: 'world_history',
-      difficulty: 'Hard' as const,
-      hostCommentary: 'A beacon of ancient engineering!',
-      funFact: 'It was built by the Ptolemaic Kingdom around 280 BC and survived for over a millennium.',
-    },
-    {
-      id: 'fb6',
-      question: 'What is the SI unit of electric capacitance named after Michael Faraday?',
-      options: ['Henry', 'Farad', 'Tesla', 'Siemens'],
-      correctIndex: 1,
-      correctAnswer: 'Farad',
-      explanation: 'The farad (symbol: F) is the SI derived unit of electrical capacitance.',
-      category: 'science_nature',
-      difficulty: 'Hard' as const,
-      hostCommentary: 'High voltage intellectual challenge!',
-      funFact: 'A one-farad capacitor is capable of storing one coulomb of electrical charge across one volt.',
-    },
-  ];
+function generateFallbackQuestions(difficulty: 'Easy' | 'Medium' | 'Hard', count: number, category?: string): TriviaQuestion[] {
+  let matched = TRIVIA_QUESTIONS.filter((q) => {
+    const catMatch = !category || category === 'all_mix' || q.category === category;
+    const diffMatch = !difficulty || q.difficulty === difficulty;
+    return catMatch && diffMatch;
+  });
 
-  return pool.slice(0, count);
+  if (matched.length < count) {
+    const catMatch = TRIVIA_QUESTIONS.filter((q) => !category || category === 'all_mix' || q.category === category);
+    matched = catMatch.length >= count ? catMatch : [...TRIVIA_QUESTIONS];
+  }
+
+  return [...matched].sort(() => Math.random() - 0.5).slice(0, count);
 }
+

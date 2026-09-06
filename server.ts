@@ -13,7 +13,7 @@ dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json());
 
@@ -165,44 +165,162 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+function decodeHtmlEntities(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&rsquo;/g, "'")
+    .replace(/&lsquo;/g, "'")
+    .replace(/&rdquo;/g, '"')
+    .replace(/&ldquo;/g, '"')
+    .replace(/&eacute;/g, 'é')
+    .replace(/&Eacute;/g, 'É')
+    .replace(/&aacute;/g, 'á')
+    .replace(/&iacute;/g, 'í')
+    .replace(/&oacute;/g, 'ó')
+    .replace(/&uacute;/g, 'ú')
+    .replace(/&ntilde;/g, 'ñ')
+    .replace(/&uuml;/g, 'ü')
+    .replace(/&deg;/g, '°')
+    .replace(/&#(\d+);/g, (_match, dec) => String.fromCharCode(Number(dec)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_match, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
 // Category Mapping for Open Trivia Database
 const CATEGORY_MAP: Record<string, number> = {
   'science_nature': 17,
   'world_history': 23,
   'geography_wonders': 22,
   'literature_arts': 10,
-  'pop_culture_gaming': 11, // Using Entertainment: Film as a proxy for pop culture
-  'breaking_news': 9, // Using General Knowledge as a proxy
+  'pop_culture_gaming': 15, // Entertainment: Video Games
+  'breaking_news': 9, // General Knowledge
 };
 
-// 1. Generate Trivia Questions
+function getLocalQuestions(category: string, difficulty: string, count: number) {
+  let pool = TRIVIA_QUESTIONS.filter((q) => {
+    const matchCat = category === 'all_mix' || !category || q.category === category;
+    const matchDiff = difficulty === 'All' || !difficulty || q.difficulty === difficulty;
+    return matchCat && matchDiff;
+  });
+
+  if (pool.length < count) {
+    const catPool = TRIVIA_QUESTIONS.filter((q) => category === 'all_mix' || !category || q.category === category);
+    pool = catPool.length >= count ? catPool : [...TRIVIA_QUESTIONS];
+  }
+
+  return [...pool].sort(() => Math.random() - 0.5).slice(0, count);
+}
+
+// 1. Generate Trivia Questions (3-Tier: Gemini -> OpenTriviaDB -> Offline Vault)
 app.post('/api/generate-trivia', async (req, res) => {
   try {
-    const { category, difficulty = 'Medium', count = 5 } = req.body;
-    
-    // Filter by category and difficulty if needed
-    let questions = TRIVIA_QUESTIONS.filter(q => 
-        (category === 'all_mix' || q.category === category) &&
-        (difficulty === 'All' || q.difficulty === difficulty)
-    );
+    const { category = 'all_mix', customTopic, difficulty = 'Medium', count = 5, personality } = req.body;
+    const targetCount = Math.max(1, Math.min(Number(count) || 5, 20));
 
-    // Shuffle and slice
-    questions = questions.sort(() => Math.random() - 0.5).slice(0, Math.min(count, questions.length));
+    // Tier 1: If custom topic is specified and Gemini API key is configured, use Gemini
+    if (customTopic && process.env.GEMINI_API_KEY) {
+      try {
+        const prompt = `Generate exactly ${targetCount} unique, factually accurate multiple-choice trivia questions on the topic: "${customTopic}".
+Difficulty: ${difficulty}.
+Return ONLY a valid JSON array of objects with keys:
+id (string), question (string), options (array of 4 strings), correctIndex (number 0-3), correctAnswer (string matching options[correctIndex]), explanation (string), category ("${category}"), difficulty ("${difficulty}"), hostCommentary (engaging line in character), funFact (intriguing verified fact).`;
 
-    res.json({ questions });
+        const aiResponse = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt,
+          config: {
+            tools: [{ googleSearch: {} }],
+          },
+        });
+
+        const text = aiResponse.text || '';
+        const match = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/\[\s*\{[\s\S]*\}\s*\]/);
+        if (match) {
+          const parsed = JSON.parse(match[1] || match[0]);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return res.json({ questions: parsed.slice(0, targetCount) });
+          }
+        }
+      } catch (geminiErr) {
+        console.warn('Custom topic Gemini generation failed, falling back:', geminiErr);
+      }
+    }
+
+    // Tier 2: Open Trivia Database API
+    if (category !== 'custom') {
+      try {
+        const otdbCategory = CATEGORY_MAP[category];
+        const diffParam = difficulty === 'All' ? '' : `&difficulty=${difficulty.toLowerCase()}`;
+        const catParam = otdbCategory ? `&category=${otdbCategory}` : '';
+        const otdbUrl = `https://opentdb.com/api.php?amount=${targetCount}${catParam}${diffParam}&type=multiple`;
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000);
+        const response = await fetch(otdbUrl, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.response_code === 0 && Array.isArray(data.results) && data.results.length > 0) {
+            const hostVoiceName = personality?.name || 'Your Host';
+            const questions = data.results.map((q: any, idx: number) => {
+              const decodedCorrect = decodeHtmlEntities(q.correct_answer);
+              const decodedIncorrect = (q.incorrect_answers || []).map((ans: string) => decodeHtmlEntities(ans));
+              const allOptions = [...decodedIncorrect, decodedCorrect].sort(() => Math.random() - 0.5);
+              const correctIdx = allOptions.indexOf(decodedCorrect);
+
+              return {
+                id: `otdb_${Date.now()}_${idx}`,
+                question: decodeHtmlEntities(q.question),
+                options: allOptions,
+                correctIndex: correctIdx >= 0 ? correctIdx : 0,
+                correctAnswer: decodedCorrect,
+                explanation: `Verified fact: "${decodedCorrect}" is the correct answer.`,
+                category,
+                difficulty: (q.difficulty ? q.difficulty.charAt(0).toUpperCase() + q.difficulty.slice(1) : difficulty) as any,
+                hostCommentary: `${hostVoiceName} says: Think carefully on this one!`,
+                funFact: `Categorized under ${decodeHtmlEntities(q.category)}.`,
+              };
+            });
+            return res.json({ questions });
+          }
+        }
+      } catch (otdbErr) {
+        console.warn('OpenTriviaDB fetch timed out or failed, falling back to local vault:', otdbErr);
+      }
+    }
+
+    // Tier 3: High-Quality Offline Vault Fallback
+    const fallbackQuestions = getLocalQuestions(category, difficulty, targetCount);
+    res.json({ questions: fallbackQuestions });
   } catch (error: any) {
     console.error('Error generating trivia:', error);
-    res.status(500).json({ error: error.message || 'Failed to generate trivia' });
+    // Ultimate fallback
+    const ultimate = getLocalQuestions('all_mix', 'Medium', 5);
+    res.json({ questions: ultimate });
   }
 });
 
 
-// 2. Host Text-to-Speech (TTS) using gemini-3.1-flash-tts-preview
+// 2. Host Text-to-Speech (TTS) using gemini-3.1-flash-tts-preview or instant fallback
 app.post('/api/host-tts', async (req, res) => {
   try {
     const { text, voice = 'Puck' } = req.body;
     if (!text || typeof text !== 'string') {
       return res.status(400).json({ error: 'Text is required' });
+    }
+
+    const validVoices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr', 'Aoede'];
+    const chosenVoice = validVoices.includes(voice) ? voice : 'Puck';
+
+    // If no API key configured, advise client to use Web Speech API immediately
+    if (!process.env.GEMINI_API_KEY) {
+      return res.json({ fallback: true, voice: chosenVoice, message: 'Local TTS active' });
     }
 
     // Clean text to avoid reading markdown symbols out loud
@@ -211,59 +329,48 @@ app.post('/api/host-tts', async (req, res) => {
       .replace(/https?:\/\/\S+/g, '')
       .trim();
 
-    const validVoices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr', 'Aoede'];
-    const chosenVoice = validVoices.includes(voice) ? voice : 'Puck';
-
-    const generateWithRetry = async (text: string, voice: string, retries = 5, delay = 5000): Promise<any> => {
-      try {
-        return await ai.models.generateContent({
-          model: 'gemini-3.1-flash-tts-preview',
-          contents: [{ parts: [{ text }] }],
-          config: {
-            responseModalities: [Modality.AUDIO],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: { voiceName: voice },
-              },
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-tts-preview',
+        contents: [{ parts: [{ text: cleanText }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: chosenVoice },
             },
           },
-        });
-      } catch (error: any) {
-        if (retries > 0 && error.status === 429) {
-          console.warn(`TTS quota exceeded, retrying in ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return generateWithRetry(text, voice, retries - 1, delay * 2);
-        }
-        throw error;
+        },
+      });
+
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (base64Audio) {
+        res.setHeader('Content-Type', 'application/json');
+        return res.json({ audio: base64Audio, voice: chosenVoice });
       }
-    };
-
-    const response = await generateWithRetry(cleanText, chosenVoice);
-
-    const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-
-    if (!base64Audio) {
-      return res.status(500).json({ error: 'No audio returned from TTS model' });
+    } catch (ttsErr: any) {
+      console.warn('Gemini TTS request bypassed, using local speech fallback:', ttsErr.message || ttsErr);
     }
 
-    // Send response strictly as JSON
     res.setHeader('Content-Type', 'application/json');
-    res.json({ audio: base64Audio, voice: chosenVoice });
+    res.json({ fallback: true, voice: chosenVoice });
   } catch (error: any) {
-    console.error('Error in host TTS:', error);
     res.setHeader('Content-Type', 'application/json');
-    res.status(500).json({ error: error.message || 'Failed to generate host speech' });
+    res.json({ fallback: true, voice: 'Puck' });
   }
 });
 
 // 3. Dynamic Host Banter / Reaction to Game Events
 app.post('/api/host-banter', async (req, res) => {
+  const { eventType, personality, context } = req.body;
+  const hostName = personality?.name || 'The Host';
+
+  if (!process.env.GEMINI_API_KEY) {
+    return res.json({ text: personality?.catchphrase || 'On to the next round, contenders!' });
+  }
+
   try {
-    const { eventType, personality, context } = req.body;
-
     const systemInstruction = personality?.systemInstruction || 'You are an engaging trivia game show host.';
-    const hostName = personality?.name || 'The Host';
-
     const prompt = `You are ${hostName}.
 System Instruction: ${systemInstruction}
 
@@ -281,19 +388,19 @@ Generate a short, punchy 1 to 2 sentence commentary strictly in your personality
 Return ONLY the spoken line text. No quotation marks or meta commentary.`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.7-flash',
+      model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
         systemInstruction,
-        temperature: 0.9,
+        temperature: 0.85,
       },
     });
 
     const line = response.text?.trim() || personality?.catchphrase || 'Let us proceed!';
     res.json({ text: line });
   } catch (error: any) {
-    console.error('Error in host banter:', error);
-    res.status(500).json({ error: error.message || 'Failed to generate banter' });
+    console.warn('Host banter AI unavailable, using in-character fallback:', error.message || error);
+    res.json({ text: personality?.catchphrase || 'The game show continues!' });
   }
 });
 

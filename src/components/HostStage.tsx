@@ -121,8 +121,11 @@ export const HostStage: React.FC<HostStageProps> = ({
           </div>
         </div>
 
-        {/* Speech Bubble / Dialogue Box */}
-        <div className="flex-1 w-full bg-white/[0.04] border border-white/10 backdrop-blur-md rounded-2xl p-4 sm:p-5 min-h-[76px] flex flex-col justify-between shadow-inner relative">
+        {/* Speech Bubble / Dialogue Box with Tail */}
+        <div className={`flex-1 w-full bg-white/[0.04] border ${isSpeaking ? 'border-purple-400/50 ring-2 ring-purple-500/30 shadow-lg shadow-purple-500/10' : 'border-white/10'} backdrop-blur-md rounded-2xl p-4 sm:p-5 min-h-[76px] flex flex-col justify-between shadow-inner relative transition-all duration-300`}>
+          {/* Bubble Pointer Arrow pointing to avatar */}
+          <div className="hidden md:block absolute -left-2 top-7 w-4 h-4 bg-white/[0.05] border-l border-b border-white/15 rotate-45" />
+
           <div className="flex items-start justify-between gap-3">
             <p className="text-white/95 text-sm sm:text-base leading-relaxed font-sans italic">
               "{speechText || personality.catchphrase}"

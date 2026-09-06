@@ -200,5 +200,6 @@ export interface GameState {
   currentScoreBreakdown?: ScoreBreakdown | null;
   currentWager: number;
   coinRewardSummary?: MatchCoinReward | null;
+  settings?: GameSettings;
 }
 
