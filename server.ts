@@ -8,6 +8,7 @@ import { GoogleGenAI, Modality } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { handleMultiplayerConnection, activeRooms } from './server/multiplayer';
 import { TRIVIA_QUESTIONS } from './server/trivia';
+import { weeklyQuestionManager } from './server/weeklyManager';
 
 dotenv.config();
 
@@ -216,42 +217,24 @@ function getLocalQuestions(category: string, difficulty: string, count: number) 
   return [...pool].sort(() => Math.random() - 0.5).slice(0, count);
 }
 
-// 1. Generate Trivia Questions (3-Tier: Gemini -> OpenTriviaDB -> Offline Vault)
+// 1. Generate Trivia Questions - Instant local serving from the 500-question weekly bank
 app.post('/api/generate-trivia', async (req, res) => {
   try {
     const { category = 'all_mix', customTopic, difficulty = 'Medium', count = 5, personality } = req.body;
-    const targetCount = Math.max(1, Math.min(Number(count) || 5, 20));
+    const targetCount = Math.max(1, Math.min(Number(count) || 5, 50));
+    const hostVoiceName = personality?.name || 'Your Host';
 
-    // Tier 1: If custom topic is specified and Gemini API key is configured, use Gemini
-    if (customTopic && process.env.GEMINI_API_KEY) {
-      try {
-        const prompt = `Generate exactly ${targetCount} unique, factually accurate multiple-choice trivia questions on the topic: "${customTopic}".
-Difficulty: ${difficulty}.
-Return ONLY a valid JSON array of objects with keys:
-id (string), question (string), options (array of 4 strings), correctIndex (number 0-3), correctAnswer (string matching options[correctIndex]), explanation (string), category ("${category}"), difficulty ("${difficulty}"), hostCommentary (engaging line in character), funFact (intriguing verified fact).`;
-
-        const aiResponse = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: prompt,
-          config: {
-            tools: [{ googleSearch: {} }],
-          },
-        });
-
-        const text = aiResponse.text || '';
-        const match = text.match(/```json\s*([\s\S]*?)\s*```/) || text.match(/\[\s*\{[\s\S]*\}\s*\]/);
-        if (match) {
-          const parsed = JSON.parse(match[1] || match[0]);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            return res.json({ questions: parsed.slice(0, targetCount) });
-          }
-        }
-      } catch (geminiErr) {
-        console.warn('Custom topic Gemini generation failed, falling back:', geminiErr);
-      }
+    // Tier 1: Local Weekly Question Vault (500 Questions Bank)
+    const weeklyQuestions = weeklyQuestionManager.getQuestions(category, difficulty, targetCount, hostVoiceName);
+    if (weeklyQuestions.length > 0) {
+      return res.json({
+        questions: weeklyQuestions,
+        source: 'weekly_bank',
+        week: weeklyQuestionManager.getMetadata().weekNumber,
+      });
     }
 
-    // Tier 2: Open Trivia Database API
+    // Tier 2: Open Trivia Database API (Secondary Fallback)
     if (category !== 'custom') {
       try {
         const otdbCategory = CATEGORY_MAP[category];
@@ -260,14 +243,13 @@ id (string), question (string), options (array of 4 strings), correctIndex (numb
         const otdbUrl = `https://opentdb.com/api.php?amount=${targetCount}${catParam}${diffParam}&type=multiple`;
 
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 4000);
+        const timeout = setTimeout(() => controller.abort(), 3000);
         const response = await fetch(otdbUrl, { signal: controller.signal });
         clearTimeout(timeout);
 
         if (response.ok) {
           const data = await response.json();
           if (data.response_code === 0 && Array.isArray(data.results) && data.results.length > 0) {
-            const hostVoiceName = personality?.name || 'Your Host';
             const questions = data.results.map((q: any, idx: number) => {
               const decodedCorrect = decodeHtmlEntities(q.correct_answer);
               const decodedIncorrect = (q.incorrect_answers || []).map((ans: string) => decodeHtmlEntities(ans));
@@ -287,7 +269,7 @@ id (string), question (string), options (array of 4 strings), correctIndex (numb
                 funFact: `Categorized under ${decodeHtmlEntities(q.category)}.`,
               };
             });
-            return res.json({ questions });
+            return res.json({ questions, source: 'otdb' });
           }
         }
       } catch (otdbErr) {
@@ -295,15 +277,25 @@ id (string), question (string), options (array of 4 strings), correctIndex (numb
       }
     }
 
-    // Tier 3: High-Quality Offline Vault Fallback
+    // Tier 3: High-Quality Static Vault Fallback
     const fallbackQuestions = getLocalQuestions(category, difficulty, targetCount);
-    res.json({ questions: fallbackQuestions });
+    res.json({ questions: fallbackQuestions, source: 'offline_vault' });
   } catch (error: any) {
     console.error('Error generating trivia:', error);
-    // Ultimate fallback
     const ultimate = getLocalQuestions('all_mix', 'Medium', 5);
-    res.json({ questions: ultimate });
+    res.json({ questions: ultimate, source: 'emergency_fallback' });
   }
+});
+
+// Weekly Bank Status & Metadata
+app.get('/api/weekly-status', (req, res) => {
+  res.json(weeklyQuestionManager.getMetadata());
+});
+
+// Admin endpoint to reload weekly questions from disk
+app.post('/api/admin/refresh-questions', (req, res) => {
+  const success = weeklyQuestionManager.reload();
+  res.json({ success, metadata: weeklyQuestionManager.getMetadata() });
 });
 
 

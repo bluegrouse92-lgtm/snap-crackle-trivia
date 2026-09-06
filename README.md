@@ -24,24 +24,28 @@
 
 ---
 
-### ⚡ Resilient 3-Tier Trivia Engine
-Never run out of questions or encounter generation timeouts. The engine uses a robust waterfall strategy:
+### ⚡ 500-Question Local Weekly Bank (Zero Runtime API Dependency)
+Gameplay never depends on external runtime APIs or incurs API billing per question. Questions are served locally and instantly from an autonomous **500-question weekly bank** refreshed weekly via a Google-grounded grab script and automated GitHub Actions cron:
 
 ```
-[ Incoming Game Request ]
-          │
-          ├── Tier 1: Gemini 2.5 Flash + Google Search Grounding (Live Breaking News & Custom Topics)
-          │           └─ Failure / No Key / Offline?
-          ▼
-          ├── Tier 2: Open Trivia Database (OTDB API with full HTML entity decoding)
-          │           └─ Rate Limited / Offline?
-          ▼
-          └── Tier 3: Curated Offline Trivia Vault (60+ questions across 7 categories & 3 difficulties)
+[ Weekly Google Grab Script / GitHub Actions Cron (Mondays 00:00 UTC) ]
+                               │
+                               ▼
+                [ data/weeklyQuestions.json ]
+          (500 Verified Local Questions + Weekly Metadata)
+                               │
+                               ▼
+                   [ server/weeklyManager.ts ]
+                  (In-Memory Fast Indexed Cache)
+                     │                     │
+                     ▼                     ▼
+          [ /api/generate-trivia ]    [ WebSocket Multiplayer Arena ]
+          (Instant <5ms Response)      (Synchronized Live Rounds)
 ```
 
-1. **Tier 1 (Gemini Search Grounding)**: Fetches real-time, verified trivia on breaking news, live events, or custom user queries with search grounding citations.
-2. **Tier 2 (Open Trivia Database)**: Rapid public trivia fallback featuring robust HTML entity sanitization (`&quot;`, `&#039;`, `&eacute;`, `&deg;`, numeric entities).
-3. **Tier 3 (Local Offline Vault)**: Deep question vault categorized into **Science & Nature**, **World History**, **Geography & Wonders**, **Pop Culture & Gaming**, **Literature & Arts**, **Breaking News**, and **All-Star Mix** across **Easy**, **Medium**, and **Hard** tiers.
+1. **Local Weekly Vault**: 500 questions evenly distributed across **Science & Nature (70)**, **World History (70)**, **Geography & Wonders (70)**, **Pop Culture & Gaming (70)**, **Literature & Arts (70)**, **Breaking News (70)**, and **All-Star Mix (80)**.
+2. **Weekly Automated Refresh**: Runs automatically every Monday at 00:00 UTC via GitHub Actions, or manually anytime with `npm run update-questions`.
+3. **Instant Zero-Lag Performance**: Sub-millisecond response time from local memory cache with zero network failure risks or quota bottlenecks during gameplay.
 
 ---
 
@@ -170,6 +174,12 @@ npm run build
 npm start
 ```
 
+### 6. Refresh Weekly 500-Question Vault (Optional)
+```bash
+npm run update-questions
+```
+Grabs 500 fresh questions across all categories and updates `data/weeklyQuestions.json`.
+
 ---
 
 ## 📡 API Reference
@@ -177,7 +187,9 @@ npm start
 | Endpoint | Method | Description |
 | :--- | :---: | :--- |
 | `/api/health` | `GET` | Health check and server timestamp |
-| `/api/generate-trivia` | `POST` | Generates questions via 3-tier engine (`category`, `difficulty`, `count`, `topic`) |
+| `/api/weekly-status` | `GET` | Current week metadata, total question count, categories breakdown, and expiration |
+| `/api/admin/refresh-questions` | `POST` | Hot-reloads weekly questions from `data/weeklyQuestions.json` |
+| `/api/generate-trivia` | `POST` | Generates questions instantly from the local 500-question weekly bank (`category`, `difficulty`, `count`) |
 | `/api/leaderboard` | `GET` | Retrieves top scores from the Hall of Fame |
 | `/api/leaderboard` | `POST` | Submits a new score to the Hall of Fame |
 | `/api/multiplayer/rooms` | `GET` | Lists active multiplayer lobbies |

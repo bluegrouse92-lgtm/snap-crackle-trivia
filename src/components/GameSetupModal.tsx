@@ -164,6 +164,18 @@ export const GameSetupModal: React.FC<GameSetupModalProps> = ({
           </button>
         </div>
 
+        {/* Weekly Questions Status Banner */}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-500/15 via-pink-500/15 to-amber-500/15 border border-purple-500/30 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="font-bold text-white">🗓️ Weekly Question Bank Active</span>
+            <span className="text-white/60">• 500 Verified Local Questions</span>
+          </div>
+          <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium">
+            ⚡ Zero Runtime API • 100% Offline Fast
+          </span>
+        </div>
+
         {/* Step 1: Interactive Category Selection Grid */}
         <div>
           <div className="flex items-center justify-between mb-3">

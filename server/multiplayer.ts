@@ -1,6 +1,7 @@
 import { WebSocket } from 'ws';
 import { GoogleGenAI } from '@google/genai';
 import { TRIVIA_QUESTIONS } from './trivia';
+import { weeklyQuestionManager } from './weeklyManager';
 
 interface MultiplayerPlayer {
   id: string;
@@ -965,6 +966,11 @@ function endMatch(room: MultiplayerRoom) {
 }
 
 function generateFallbackQuestions(difficulty: 'Easy' | 'Medium' | 'Hard', count: number, category?: string): TriviaQuestion[] {
+  const weekly = weeklyQuestionManager.getQuestions(category, difficulty, count);
+  if (weekly.length >= count) {
+    return weekly;
+  }
+
   let matched = TRIVIA_QUESTIONS.filter((q) => {
     const catMatch = !category || category === 'all_mix' || q.category === category;
     const diffMatch = !difficulty || q.difficulty === difficulty;
