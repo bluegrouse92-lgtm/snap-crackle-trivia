@@ -69,6 +69,7 @@ Stuck on a brain-melter? Activate game-show lifelines directly from your HUD:
 ###. Refresh Weekly 500-Question Vault (Optional)
 ```bash
 npm run update
+
 ```
 Grabs 500 fresh questions across all categories and updates
 ---
