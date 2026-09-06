@@ -193,11 +193,16 @@ export default function App() {
   };
 
   // -------------------------------------------------------------
-  // MULTIPLAYER WEBSOCKET CONNECTION
+  // MULTIPLAYER WEBSOCKET CONNECTION & AUTO-RECONNECT
   // -------------------------------------------------------------
-  const connectMultiplayerWs = (onOpenCallback: (ws: WebSocket) => void) => {
+  // TODO(refactor): Extract multiplayer WebSocket state machine into a dedicated useMultiplayer custom hook
+  // TODO(a11y): Add ARIA live regions for screen readers during fast-paced countdown timers
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const connectMultiplayerWs = (onOpenCallback?: (ws: WebSocket) => void) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      onOpenCallback(wsRef.current);
+      if (onOpenCallback) onOpenCallback(wsRef.current);
       return;
     }
 
@@ -210,7 +215,19 @@ export default function App() {
 
     ws.onopen = () => {
       console.log('Multiplayer WS Connected');
-      onOpenCallback(ws);
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      // Start 20-second keepalive ping to prevent proxy/NAT dropouts
+      if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'heartbeat_ping' }));
+        }
+      }, 20000);
+
+      if (onOpenCallback) onOpenCallback(ws);
     };
 
     ws.onmessage = (event) => {
@@ -218,6 +235,18 @@ export default function App() {
         const msg = JSON.parse(event.data);
         if (msg.type === 'room_state') {
           setMultiplayerRoomState(msg.state);
+          // Persist room credentials for seamless crash/refresh recovery
+          if (msg.state?.roomCode) {
+            localStorage.setItem('trivia_active_room_code', msg.state.roomCode);
+          }
+          if (msg.state?.roomId) {
+            localStorage.setItem('trivia_active_room_id', msg.state.roomId);
+          }
+        } else if (msg.type === 'room_joined') {
+          if (msg.roomCode) localStorage.setItem('trivia_active_room_code', msg.roomCode);
+          if (msg.roomId) localStorage.setItem('trivia_active_room_id', msg.roomId);
+        } else if (msg.type === 'heartbeat_pong') {
+          // Heartbeat acknowledged
         } else if (msg.type === 'error') {
           alert(`Multiplayer Notice: ${msg.message}`);
         }
@@ -227,7 +256,31 @@ export default function App() {
     };
 
     ws.onclose = () => {
-      console.log('Multiplayer WS closed');
+      console.log('Multiplayer WS closed. Checking for auto-reconnect...');
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current);
+        heartbeatIntervalRef.current = null;
+      }
+      // Auto-reconnect if match credentials are still stored
+      const savedCode = localStorage.getItem('trivia_active_room_code');
+      const savedId = localStorage.getItem('trivia_active_room_id');
+      if (savedCode || savedId) {
+        if (!reconnectTimeoutRef.current) {
+          reconnectTimeoutRef.current = setTimeout(() => {
+            reconnectTimeoutRef.current = null;
+            connectMultiplayerWs((newWs) => {
+              newWs.send(
+                JSON.stringify({
+                  type: 'reconnect_room',
+                  roomId: savedId,
+                  roomCode: savedCode,
+                  playerId: myPlayerId,
+                })
+              );
+            });
+          }, 1500);
+        }
+      }
     };
 
     ws.onerror = (err) => {
@@ -302,6 +355,16 @@ export default function App() {
   };
 
   const handleLeaveMultiplayer = () => {
+    localStorage.removeItem('trivia_active_room_code');
+    localStorage.removeItem('trivia_active_room_id');
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
     sendMultiplayerAction({ type: 'leave_room' });
     setMultiplayerRoomState(null);
     setActiveMode('single');

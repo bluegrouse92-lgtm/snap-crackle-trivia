@@ -2,6 +2,11 @@ import { WebSocket } from 'ws';
 import { GoogleGenAI } from '@google/genai';
 import { TRIVIA_QUESTIONS } from './trivia';
 import { weeklyQuestionManager } from './weeklyManager';
+import logger, { logWs, logError } from './logger';
+
+// TODO(tech-debt): Migrate activeRooms from in-memory Map to Redis for multi-instance horizontal scaling
+// TODO(feature): Implement WebRTC data channels for low-latency peer-to-peer host voice broadcast
+// TODO(security): Implement rate limiting per IP on WebSocket handshake and room creation
 
 interface MultiplayerPlayer {
   id: string;
@@ -14,6 +19,7 @@ interface MultiplayerPlayer {
   streak: number;
   isReady: boolean;
   isConnected: boolean;
+  disconnectedAt?: number;
   isHost: boolean;
   hasAnsweredCurrent: boolean;
   currentAnswerIndex: number | null;
@@ -76,6 +82,7 @@ export interface MultiplayerRoom {
   countdownSeconds?: number;
   timerInterval?: NodeJS.Timeout | null;
   recapTimeout?: NodeJS.Timeout | null;
+  cleanupTimeout?: NodeJS.Timeout | null;
 }
 
 // In-memory active rooms
@@ -179,7 +186,7 @@ export function broadcastRoomState(room: MultiplayerRoom) {
       try {
         p.ws.send(payload);
       } catch (err) {
-        console.error('Error sending room state to player:', p.id, err);
+        logError(`Error sending room state to player ${p.id}`, err, 'MULTIPLAYER_WS');
       }
     }
   });
@@ -189,10 +196,27 @@ export function handleMultiplayerConnection(ws: WebSocket, ai: GoogleGenAI) {
   let currentPlayerId: string | null = null;
   let currentRoomId: string | null = null;
 
+  // Periodic heartbeat ping to keep connection alive through proxies/NAT
+  const pingInterval = setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.ping();
+    } else {
+      clearInterval(pingInterval);
+    }
+  }, 25000);
+
   ws.on('message', async (messageData: Buffer | string) => {
     try {
       const data = JSON.parse(messageData.toString());
       const { type } = data;
+
+      // Heartbeat ping/pong response
+      if (type === 'heartbeat_ping') {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'heartbeat_pong', timestamp: Date.now() }));
+        }
+        return;
+      }
 
       // 1. CREATE ROOM
       if (type === 'create_room') {
@@ -364,8 +388,23 @@ export function handleMultiplayerConnection(ws: WebSocket, ai: GoogleGenAI) {
         // Check if player reconnected
         const existingIdx = targetRoom.players.findIndex((p) => p.id === newPlayer.id);
         if (existingIdx !== -1) {
-          targetRoom.players[existingIdx].ws = ws;
-          targetRoom.players[existingIdx].isConnected = true;
+          const existingPlayer = targetRoom.players[existingIdx];
+          existingPlayer.ws = ws;
+          existingPlayer.isConnected = true;
+          existingPlayer.disconnectedAt = undefined;
+          if (targetRoom.cleanupTimeout) {
+            clearTimeout(targetRoom.cleanupTimeout);
+            targetRoom.cleanupTimeout = null;
+          }
+          logWs(`Player ${existingPlayer.name} reconnected to room ${targetRoom.roomCode}`);
+          targetRoom.chatMessages.push({
+            id: `msg_${Date.now()}`,
+            senderId: 'system',
+            senderName: 'Host Announcer',
+            text: `${existingPlayer.name} reconnected to the match!`,
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            isSystem: true,
+          });
         } else {
           targetRoom.players.push(newPlayer);
           targetRoom.potTotal += newPlayer.bet;
@@ -385,9 +424,56 @@ export function handleMultiplayerConnection(ws: WebSocket, ai: GoogleGenAI) {
             roomId: targetRoom.roomId,
             roomCode: targetRoom.roomCode,
             playerId: newPlayer.id,
+            reconnected: existingIdx !== -1,
           })
         );
         broadcastRoomState(targetRoom);
+      }
+
+      // RECONNECT ROOM (Explicit rejoin after browser crash / refresh)
+      else if (type === 'reconnect_room') {
+        const { roomId, roomCode, playerId } = data;
+        let targetRoom = roomId ? activeRooms.get(roomId) : undefined;
+        if (!targetRoom && roomCode) {
+          const upper = String(roomCode).toUpperCase().trim();
+          targetRoom = Array.from(activeRooms.values()).find((r) => r.roomCode.toUpperCase() === upper);
+        }
+
+        if (targetRoom) {
+          const existingPlayer = targetRoom.players.find((p) => p.id === playerId);
+          if (existingPlayer) {
+            existingPlayer.ws = ws;
+            existingPlayer.isConnected = true;
+            existingPlayer.disconnectedAt = undefined;
+            currentPlayerId = existingPlayer.id;
+            currentRoomId = targetRoom.roomId;
+            if (targetRoom.cleanupTimeout) {
+              clearTimeout(targetRoom.cleanupTimeout);
+              targetRoom.cleanupTimeout = null;
+            }
+            logWs(`Player ${existingPlayer.name} successfully reconnected to ${targetRoom.roomCode}`);
+            targetRoom.chatMessages.push({
+              id: `msg_${Date.now()}`,
+              senderId: 'system',
+              senderName: 'Host Announcer',
+              text: `${existingPlayer.name} reconnected to the match!`,
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              isSystem: true,
+            });
+            ws.send(
+              JSON.stringify({
+                type: 'room_joined',
+                roomId: targetRoom.roomId,
+                roomCode: targetRoom.roomCode,
+                playerId: existingPlayer.id,
+                reconnected: true,
+              })
+            );
+            broadcastRoomState(targetRoom);
+            return;
+          }
+        }
+        ws.send(JSON.stringify({ type: 'error', message: 'Unable to reconnect: Room no longer active.' }));
       }
 
       // 3. QUICK MATCH (Auto-find or create public lobby)
@@ -682,21 +768,22 @@ export function handleMultiplayerConnection(ws: WebSocket, ai: GoogleGenAI) {
 
       // 10. LEAVE ROOM
       else if (type === 'leave_room') {
-        handlePlayerLeave(currentRoomId, currentPlayerId);
+        handlePlayerLeave(currentRoomId, currentPlayerId, true);
       }
-    } catch (err) {
-      console.error('Error handling multiplayer message:', err);
+    } catch (err: any) {
+      logError('Error handling multiplayer message', err, 'MULTIPLAYER_WS');
     }
   });
 
   ws.on('close', () => {
+    clearInterval(pingInterval);
     if (currentRoomId && currentPlayerId) {
-      handlePlayerLeave(currentRoomId, currentPlayerId);
+      handlePlayerLeave(currentRoomId, currentPlayerId, false);
     }
   });
 }
 
-function handlePlayerLeave(roomId: string | null, playerId: string | null) {
+function handlePlayerLeave(roomId: string | null, playerId: string | null, isExplicitLeave = false) {
   if (!roomId || !playerId) return;
   const room = activeRooms.get(roomId);
   if (!room) return;
@@ -704,11 +791,13 @@ function handlePlayerLeave(roomId: string | null, playerId: string | null) {
   const playerIdx = room.players.findIndex((p) => p.id === playerId);
   if (playerIdx !== -1) {
     const leavingPlayer = room.players[playerIdx];
-    if (room.status === 'lobby') {
+
+    if (room.status === 'lobby' && isExplicitLeave) {
       room.players.splice(playerIdx, 1);
       room.potTotal = Math.max(0, room.potTotal - leavingPlayer.bet);
     } else {
       leavingPlayer.isConnected = false;
+      leavingPlayer.disconnectedAt = Date.now();
     }
 
     // Pass host if leaving player was host
@@ -720,20 +809,44 @@ function handlePlayerLeave(roomId: string | null, playerId: string | null) {
       }
     }
 
+    const leaveNotice = isExplicitLeave
+      ? `${leavingPlayer.name} has left the match.`
+      : `${leavingPlayer.name} temporarily disconnected. Reconnecting...`;
+
     room.chatMessages.push({
       id: `msg_${Date.now()}`,
       senderId: 'system',
       senderName: 'Host Announcer',
-      text: `${leavingPlayer.name} has left the match.`,
+      text: leaveNotice,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isSystem: true,
     });
 
-    if (room.players.filter((p) => !p.isBot && p.isConnected).length === 0) {
-      // Clean up timers
-      if (room.timerInterval) clearInterval(room.timerInterval);
-      if (room.recapTimeout) clearTimeout(room.recapTimeout);
-      activeRooms.delete(roomId);
+    const activeHumans = room.players.filter((p) => !p.isBot && p.isConnected);
+
+    if (activeHumans.length === 0) {
+      if (isExplicitLeave) {
+        // Immediate cleanup on explicit leave
+        logWs(`All players explicitly left room ${roomId}. Cleaning up room immediately.`);
+        if (room.timerInterval) clearInterval(room.timerInterval);
+        if (room.recapTimeout) clearTimeout(room.recapTimeout);
+        if (room.cleanupTimeout) clearTimeout(room.cleanupTimeout);
+        activeRooms.delete(roomId);
+      } else {
+        // Start 60s grace period before deleting room
+        if (!room.cleanupTimeout) {
+          logWs(`All human players disconnected from room ${roomId}. Starting 60s grace period for reconnection.`);
+          room.cleanupTimeout = setTimeout(() => {
+            const stillEmpty = room.players.filter((p) => !p.isBot && p.isConnected).length === 0;
+            if (stillEmpty) {
+              logWs(`Grace period expired for room ${roomId}. Cleaning up room.`);
+              if (room.timerInterval) clearInterval(room.timerInterval);
+              if (room.recapTimeout) clearTimeout(room.recapTimeout);
+              activeRooms.delete(roomId);
+            }
+          }, 60000);
+        }
+      }
     } else {
       broadcastRoomState(room);
     }

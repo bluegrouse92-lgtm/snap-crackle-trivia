@@ -11,6 +11,8 @@
  * - UNIT-74 (Cold computational machine)
  */
 
+// TODO(ai-enhancement): Support dynamic LLM streaming mode when a valid Gemini key is present while keeping offline vault as instant fallback
+
 import { HostPersonality, TriviaQuestion, DifficultyLevel } from '../types';
 
 export interface BanterContext {

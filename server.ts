@@ -9,14 +9,39 @@ import { createServer as createViteServer } from 'vite';
 import { handleMultiplayerConnection, activeRooms } from './server/multiplayer';
 import { TRIVIA_QUESTIONS } from './server/trivia';
 import { weeklyQuestionManager } from './server/weeklyManager';
+import logger, { logHttp, logWs, logError, logTrivia, logLeaderboard } from './server/logger';
+import {
+  validateGenerateTrivia,
+  validateLeaderboardSubmission,
+  validateHostBanterRequest,
+  validateTTSRequest,
+  validateLifelineSearch,
+  sanitizeString,
+  sanitizeIdentifier,
+} from './server/middleware/validation';
 
 dotenv.config();
+
+// TODO(observability): Integrate distributed APM and error tracking (e.g. Sentry or OpenTelemetry)
+// TODO(security): Add express-rate-limit to protect AI endpoints against high-volume abuse
 
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+
+// HTTP Request Logging Middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    if (!req.url.startsWith('/@') && !req.url.startsWith('/src') && !req.url.startsWith('/node_modules')) {
+      logHttp(`${req.method} ${req.originalUrl} [${res.statusCode}] - ${duration}ms`);
+    }
+  });
+  next();
+});
 
 // Initialize Gemini Client
 const ai = new GoogleGenAI({
@@ -29,6 +54,7 @@ const ai = new GoogleGenAI({
 });
 
 // File-backed Persistent Leaderboard
+// TODO(tech-debt): Migrate file-based leaderboard (data/leaderboard.json) to SQLite or PostgreSQL for transactional atomicity
 const DATA_DIR = path.join(process.cwd(), 'data');
 const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json');
 
@@ -146,7 +172,7 @@ function loadLeaderboard(): StoredLeaderboardEntry[] {
       return JSON.parse(data);
     }
   } catch (err) {
-    console.error('Error reading leaderboard file, using defaults:', err);
+    logError('Error reading leaderboard file, using defaults', err, 'LEADERBOARD');
   }
   // Initialize with seeded entries
   saveLeaderboard(DEFAULT_SEEDED_SCORES);
@@ -157,7 +183,7 @@ function saveLeaderboard(entries: StoredLeaderboardEntry[]): void {
   try {
     fs.writeFileSync(LEADERBOARD_FILE, JSON.stringify(entries, null, 2), 'utf-8');
   } catch (err) {
-    console.error('Error saving leaderboard file:', err);
+    logError('Error saving leaderboard file', err, 'LEADERBOARD');
   }
 }
 
@@ -192,23 +218,6 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&#x([0-9a-fA-F]+);/g, (_match, hex) => String.fromCharCode(parseInt(hex, 16)));
 }
 
-// Input Sanitization Utilities
-export function sanitizeString(input: unknown, maxLength = 64): string {
-  if (typeof input !== 'string') return '';
-  return input
-    .replace(/[<>'"&/\\;`]/g, '')
-    .trim()
-    .slice(0, maxLength);
-}
-
-export function sanitizeIdentifier(input: unknown, maxLength = 32): string {
-  if (typeof input !== 'string') return '';
-  return input
-    .replace(/[^a-zA-Z0-9_-]/g, '')
-    .trim()
-    .slice(0, maxLength);
-}
-
 // Category Mapping for Open Trivia Database
 const CATEGORY_MAP: Record<string, number> = {
   'science_nature': 17,
@@ -235,15 +244,10 @@ function getLocalQuestions(category: string, difficulty: string, count: number) 
 }
 
 // 1. Generate Trivia Questions - Instant local serving from the 500-question weekly bank
-app.post('/api/generate-trivia', async (req, res) => {
+app.post('/api/generate-trivia', validateGenerateTrivia, async (req, res) => {
   try {
-    const category = sanitizeIdentifier(req.body.category, 32) || 'all_mix';
-    const customTopic = req.body.customTopic ? sanitizeString(req.body.customTopic, 100) : undefined;
-    const rawDiff = req.body.difficulty;
-    const difficulty = (rawDiff === 'Easy' || rawDiff === 'Hard' || rawDiff === 'All') ? rawDiff : 'Medium';
-    const count = req.body.count;
-    const targetCount = Math.max(1, Math.min(Number(count) || 5, 50));
-    const hostVoiceName = sanitizeString(req.body.personality?.name, 32) || 'Your Host';
+    const { category, customTopic, difficulty, count: targetCount, hostVoiceName } = req.body;
+    logTrivia(`Serving trivia questions (count: ${targetCount}, category: ${category}, diff: ${difficulty})`);
 
     // Tier 1: Local Weekly Question Vault (500 Questions Bank)
     const weeklyQuestions = weeklyQuestionManager.getQuestions(category, difficulty, targetCount, hostVoiceName);
@@ -321,13 +325,9 @@ app.post('/api/admin/refresh-questions', (req, res) => {
 
 
 // 2. Host Text-to-Speech (TTS) using gemini-3.1-flash-tts-preview or instant fallback
-app.post('/api/host-tts', async (req, res) => {
+app.post('/api/host-tts', validateTTSRequest, async (req, res) => {
   try {
     const { text, voice = 'Puck' } = req.body;
-    if (!text || typeof text !== 'string') {
-      return res.status(400).json({ error: 'Text is required' });
-    }
-
     const validVoices = ['Puck', 'Charon', 'Kore', 'Fenrir', 'Zephyr', 'Aoede'];
     const chosenVoice = validVoices.includes(voice) ? voice : 'Puck';
 
@@ -336,16 +336,10 @@ app.post('/api/host-tts', async (req, res) => {
       return res.json({ fallback: true, voice: chosenVoice, message: 'Local TTS active' });
     }
 
-    // Clean text to avoid reading markdown symbols out loud
-    const cleanText = text
-      .replace(/[*_#`~[\]()]/g, '')
-      .replace(/https?:\/\/\S+/g, '')
-      .trim();
-
     try {
       const response = await ai.models.generateContent({
         model: 'gemini-3.1-flash-tts-preview',
-        contents: [{ parts: [{ text: cleanText }] }],
+        contents: [{ parts: [{ text }] }],
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: {
@@ -362,23 +356,22 @@ app.post('/api/host-tts', async (req, res) => {
         return res.json({ audio: base64Audio, voice: chosenVoice });
       }
     } catch (ttsErr: any) {
-      console.warn('Gemini TTS request bypassed, using local speech fallback:', ttsErr.message || ttsErr);
+      logger.warn('Gemini TTS request bypassed, using local speech fallback', { error: ttsErr.message });
     }
 
     res.setHeader('Content-Type', 'application/json');
     res.json({ fallback: true, voice: chosenVoice });
   } catch (error: any) {
+    logError('Error in /api/host-tts', error, 'TTS');
     res.setHeader('Content-Type', 'application/json');
     res.json({ fallback: true, voice: 'Puck' });
   }
 });
 
 // 3. Dynamic Host Banter / Reaction to Game Events
-app.post('/api/host-banter', async (req, res) => {
-  const eventType = sanitizeIdentifier(req.body.eventType, 32) || 'general';
-  const personality = req.body.personality;
-  const hostName = sanitizeString(personality?.name, 32) || 'The Host';
-  const context = req.body.context;
+app.post('/api/host-banter', validateHostBanterRequest, async (req, res) => {
+  const { eventType, personality, context } = req.body;
+  const hostName = personality?.name || 'The Host';
 
   if (!process.env.GEMINI_API_KEY) {
     return res.json({ text: personality?.catchphrase || 'On to the next round, contenders!' });
@@ -414,13 +407,13 @@ Return ONLY the spoken line text. No quotation marks or meta commentary.`;
     const line = response.text?.trim() || personality?.catchphrase || 'Let us proceed!';
     res.json({ text: line });
   } catch (error: any) {
-    console.warn('Host banter AI unavailable, using in-character fallback:', error.message || error);
+    logger.warn('Host banter AI unavailable, using in-character fallback', { error: error.message });
     res.json({ text: personality?.catchphrase || 'The game show continues!' });
   }
 });
 
 // 4. Lifeline Search Grounded Deep-Dive Fact
-app.post('/api/lifeline-search', async (req, res) => {
+app.post('/api/lifeline-search', validateLifelineSearch, async (req, res) => {
   try {
     const { question, options, category } = req.body;
 
@@ -456,7 +449,7 @@ Provide:
 
     res.json({ fact: factText, sources: sources.slice(0, 3) });
   } catch (error: any) {
-    console.error('Error in lifeline search:', error);
+    logError('Error in lifeline search', error, 'SEARCH');
     res.status(500).json({ error: error.message || 'Failed to perform search lifeline' });
   }
 });
@@ -485,49 +478,38 @@ app.get('/api/leaderboard', (req, res) => {
 
     res.json({ entries: rankedEntries, totalCount: entries.length });
   } catch (error: any) {
-    console.error('Error retrieving leaderboard:', error);
+    logError('Error retrieving leaderboard', error, 'LEADERBOARD');
     res.status(500).json({ error: 'Failed to retrieve leaderboard' });
   }
 });
 
-app.post('/api/leaderboard', (req, res) => {
+app.post('/api/leaderboard', validateLeaderboardSubmission, (req, res) => {
   try {
     const {
       playerName,
       score,
       accuracyPct,
-      difficulty = 'Medium',
-      category = 'all_mix',
-      highestStreak = 0,
-      hostName = 'The Host',
-      hostId = 'roxy',
-      totalQuestions = 5,
-      correctQuestions = 0,
+      difficulty,
+      category,
+      highestStreak,
+      hostName,
+      hostId,
+      totalQuestions,
+      correctQuestions,
     } = req.body;
-
-    const cleanPlayerName = sanitizeString(playerName, 24) || 'Contender';
-    const cleanScore = Math.max(0, Math.min(10000000, Math.round(Number(score) || 0)));
-    const cleanAccuracy = Math.max(0, Math.min(100, Math.round(Number(accuracyPct) || 0)));
-    const cleanDifficulty = (difficulty === 'Easy' || difficulty === 'Hard') ? difficulty : 'Medium';
-    const cleanCategory = sanitizeIdentifier(category, 32) || 'all_mix';
-    const cleanHighestStreak = Math.max(0, Math.min(100, Math.round(Number(highestStreak) || 0)));
-    const cleanHostName = sanitizeString(hostName, 32) || 'The Host';
-    const cleanHostId = sanitizeIdentifier(hostId, 20) || 'roxy';
-    const cleanTotal = Math.max(1, Math.min(100, Math.round(Number(totalQuestions) || 5)));
-    const cleanCorrect = Math.max(0, Math.min(cleanTotal, Math.round(Number(correctQuestions) || 0)));
 
     const newEntry: StoredLeaderboardEntry = {
       id: `score_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-      playerName: cleanPlayerName,
-      score: cleanScore,
-      accuracyPct: cleanAccuracy,
-      difficulty: cleanDifficulty,
-      category: cleanCategory,
-      highestStreak: cleanHighestStreak,
-      hostName: cleanHostName,
-      hostId: cleanHostId,
-      totalQuestions: cleanTotal,
-      correctQuestions: cleanCorrect,
+      playerName,
+      score,
+      accuracyPct,
+      difficulty,
+      category,
+      highestStreak,
+      hostName,
+      hostId,
+      totalQuestions,
+      correctQuestions,
       timestamp: new Date().toISOString(),
     };
 
@@ -543,9 +525,10 @@ app.post('/api/leaderboard', (req, res) => {
     const rankIndex = trimmed.findIndex((e) => e.id === newEntry.id);
     const rank = rankIndex !== -1 ? rankIndex + 1 : trimmed.length;
 
+    logLeaderboard(`New score registered: ${playerName} - ${score.toLocaleString()} pts (Rank #${rank})`);
     res.json({ success: true, entry: { ...newEntry, rank }, totalCount: trimmed.length });
   } catch (error: any) {
-    console.error('Error saving leaderboard score:', error);
+    logError('Error saving leaderboard score', error, 'LEADERBOARD');
     res.status(500).json({ error: 'Failed to save score' });
   }
 });
@@ -666,12 +649,12 @@ Current Question context: ${currentQuestion ? JSON.stringify(currentQuestion) : 
         });
       }
     } catch (err: any) {
-      console.error('Error handling WebSocket message:', err);
+      logError('Error handling Live WebSocket message', err, 'LIVE_WS');
     }
   });
 
   clientWs.on('close', () => {
-    console.log('Client disconnected from Live WebSocket');
+    logWs('Client disconnected from Live WebSocket');
     if (session) {
       try {
         session.close?.();
@@ -699,7 +682,7 @@ async function start() {
   }
 
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`💥⚡🍿 Snap Crackle Pop Trivia server listening on http://0.0.0.0:${PORT}`);
+    logger.info(`💥⚡🍿 Snap Crackle Pop Trivia server listening on http://0.0.0.0:${PORT}`, { port: PORT });
   });
 }
 

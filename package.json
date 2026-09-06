@@ -46,6 +46,7 @@
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "vite": "^6.2.3",
+    "winston": "^3.19.0",
     "ws": "^8.21.3"
   },
   "devDependencies": {
