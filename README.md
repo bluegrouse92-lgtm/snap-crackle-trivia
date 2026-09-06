@@ -24,7 +24,7 @@ Gameplay never depends on external runtime APIs or incurs API billing per questi
                      │                     │
                      ▼                     
 
-### 🎙️ 4 Dynamic AI Game-Show Hosts with Voice Narration
+### 🎙️ Dynamic AI Game-Show Hosts with Voice Narration
 Each host brings a unique personality, commentary style, visual mood badges, and voice:
 
 | Host | Archetype | Voice Tone | Specialty |
@@ -70,8 +70,7 @@ Stuck on a brain-melter? Activate game-show lifelines directly from your HUD:
 ```bash
 npm run update
 ```
-Grabs 500 fresh questions across all categories and updates `data/weeklyQuestions.json`.
-
+Grabs 500 fresh questions across all categories and updates
 ---
 
 
