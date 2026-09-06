@@ -1,6 +1,6 @@
 {
-  "name": "PersonaTrivia AI",
-  "description": "An interactive trivia game featuring an AI game show host with dynamic personalities, real-time voice conversations, Search-grounded trivia, and TTS narration.",
+  "name": "Snap Crackle Pop Trivia! 💥⚡🍿",
+  "description": "An electrifying arcade game-show trivia experience featuring reactive AI hosts, 3-tier question generation (Gemini Search + OpenTriviaDB + Offline Vault), dynamic voice narration, wagering, streak multipliers, and real-time multiplayer.",
   "requestFramePermissions": [
     "microphone"
   ],
