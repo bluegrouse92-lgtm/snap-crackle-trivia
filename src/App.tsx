@@ -10,7 +10,13 @@ import {
   MultiplayerRoomState,
 } from './types';
 import { PRESET_PERSONALITIES } from './data/personalities';
-import { getRandomBanter } from './data/banterLibrary';
+import {
+  generateQuestionSpeech,
+  generateSmackTalk,
+  generateLifelineSmack,
+  generateGameIntro,
+  generateGameOverSmack,
+} from './utils/hostBrain';
 import { Header } from './components/Header';
 import { HostStage } from './components/HostStage';
 import { TriviaQuestionCard } from './components/TriviaQuestionCard';
@@ -53,6 +59,7 @@ export default function App() {
   const [wallet, setWallet] = useState(getCoinWallet());
   const [canClaimDaily, setCanClaimDaily] = useState(checkCanClaimDailyBonus());
   const [lastGameSettings, setLastGameSettings] = useState<GameSettings | null>(null);
+  const [savedMatchAvailable, setSavedMatchAvailable] = useState(false);
 
   // Multiplayer State
   const [multiplayerRoomState, setMultiplayerRoomState] = useState<MultiplayerRoomState | null>(null);
@@ -99,10 +106,21 @@ export default function App() {
   const [timeSpentOnCurrent, setTimeSpentOnCurrent] = useState(0);
   const [currentScoreBreakdown, setCurrentScoreBreakdown] = useState<ScoreBreakdown | null>(null);
   
-  // 9. Effects
+  // Effects & Crash Recovery
   useEffect(() => {
     // Loading timer
     const loadingTimer = setTimeout(() => setIsAppLoading(false), 2000);
+
+    // Check for saved in-progress match in local storage
+    try {
+      const saved = localStorage.getItem('snap_crackle_pop_active_game');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.gameState?.status === 'playing' && parsed.gameState.questions?.length > 0) {
+          setSavedMatchAvailable(true);
+        }
+      }
+    } catch {}
     
     // Sync Coin Wallet & Auto-prompt daily bonus
     const w = getCoinWallet();
@@ -122,6 +140,52 @@ export default function App() {
     };
   }, []);
 
+  // Auto-save active match to localStorage for crash resilience
+  useEffect(() => {
+    if (gameState.status === 'playing' && gameState.questions.length > 0) {
+      try {
+        localStorage.setItem(
+          'snap_crackle_pop_active_game',
+          JSON.stringify({ gameState, lastGameSettings })
+        );
+      } catch (err) {
+        console.warn('Failed to auto-save game session:', err);
+      }
+    } else if (gameState.status === 'game_over') {
+      localStorage.removeItem('snap_crackle_pop_active_game');
+      setSavedMatchAvailable(false);
+    }
+  }, [gameState, lastGameSettings]);
+
+  const handleResumeSavedMatch = () => {
+    try {
+      const saved = localStorage.getItem('snap_crackle_pop_active_game');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.gameState) {
+          setGameState(parsed.gameState);
+          if (parsed.lastGameSettings) {
+            setLastGameSettings(parsed.lastGameSettings);
+            setMaxTime(parsed.lastGameSettings.timeLimit || 25);
+            setTimeRemaining(parsed.lastGameSettings.timeLimit || 25);
+          }
+          setSavedMatchAvailable(false);
+          setHasAnswered(false);
+          setSelectedOption(null);
+          playSoundFX('click');
+        }
+      }
+    } catch (err) {
+      console.error('Failed to resume saved game:', err);
+      localStorage.removeItem('snap_crackle_pop_active_game');
+      setSavedMatchAvailable(false);
+    }
+  };
+
+  const handleDismissSavedMatch = () => {
+    localStorage.removeItem('snap_crackle_pop_active_game');
+    setSavedMatchAvailable(false);
+  };
 
   const refreshWallet = () => {
     setWallet(getCoinWallet());
@@ -244,40 +308,12 @@ export default function App() {
     refreshWallet();
   };
 
-  // Trigger Host Speech via Dual Engine (Gemini Flash TTS -> Local Web Speech Fallback)
+  // Fast Local Speech Synthesis Engine (Zero API latency, 100% offline)
   const speakHostLine = async (text: string, voiceName?: string) => {
     if (!text) return;
-    setIsLoadingVoice(true);
-
-    // Try Gemini TTS first if available
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 2000);
-      const res = await fetch('/api/host-tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: voiceName || personality.voice }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.audio) {
-          setGameState((prev) => ({ ...prev, isHostSpeaking: true }));
-          setIsLoadingVoice(false);
-          await playPcmBase64(data.audio, 24000, () => {
-            setGameState((prev) => ({ ...prev, isHostSpeaking: false }));
-          });
-          return;
-        }
-      }
-    } catch {
-      // Fall through to browser speech synthesis
-    }
+    setIsLoadingVoice(false);
 
     if (!('speechSynthesis' in window)) {
-      setIsLoadingVoice(false);
       return;
     }
 
@@ -386,7 +422,7 @@ export default function App() {
       }
 
       const firstQ = questions[0];
-      const initialSpeech = firstQ.hostCommentary || `Welcome, contenders! Let us begin our battle of wits with question number one.`;
+      const initialSpeech = generateQuestionSpeech(firstQ, settings.personality, 0, questions.length);
 
       setLastGameSettings(settings);
 
@@ -483,8 +519,16 @@ export default function App() {
     };
     setCurrentScoreBreakdown(breakdown);
 
-    // Dynamic banter for timeout
-    let reactionText = getRandomBanter('timeout') + ` The correct answer was ${currentQ.correctAnswer}.`;
+    // Dynamic contextual smack talk for timeout
+    const reactionText = generateSmackTalk({
+      personality,
+      isTimeout: true,
+      isCorrect: false,
+      streak: gameState.streak,
+      highestStreak: gameState.highestStreak,
+      wager: gameState.currentWager || 0,
+      question: currentQ,
+    }) + ` The correct answer was ${currentQ.correctAnswer}.`;
 
     setGameState((prev) => ({
       ...prev,
@@ -583,10 +627,17 @@ export default function App() {
     const nextScore = Math.max(0, gameState.score + points);
     const nextHighest = Math.max(gameState.highestStreak, nextStreak);
 
-    // Call dynamic Host reaction
-    let reactionText = isCorrect
-      ? getRandomBanter('correct')
-      : getRandomBanter('wrong');
+    // Call dynamic Host smack talk / praise engine
+    const reactionText = generateSmackTalk({
+      personality,
+      isCorrect,
+      streak: isCorrect ? nextStreak : gameState.streak,
+      highestStreak: nextHighest,
+      wager: isDoubleDown ? (gameState.currentWager || 0) * 2 : (gameState.currentWager || 0),
+      question: currentQ,
+      selectedText: currentQ.options[optionIndex],
+      timeSpentSeconds: timeSpentOnCurrent,
+    });
 
     setGameState((prev) => ({
       ...prev,
@@ -633,7 +684,8 @@ export default function App() {
       const correctCount = gameState.answersHistory.filter((a) => a.isCorrect).length;
       const total = gameState.questions.length;
 
-      let finalClosing = getRandomBanter('game_over') + ` You scored ${gameState.score.toLocaleString()} points with ${correctCount} of ${total} correct answers.`;
+      const accuracy = Math.round((correctCount / total) * 100);
+      const finalClosing = generateGameOverSmack(personality, accuracy) + ` You scored ${gameState.score.toLocaleString()} points with ${correctCount} of ${total} correct answers!`;
 
       setGameState((prev) => ({
         ...prev,
@@ -652,7 +704,7 @@ export default function App() {
 
     // Advance to next question
     const nextQ = gameState.questions[nextIdx];
-    const introSpeech = nextQ.hostCommentary || `Onward to Question ${nextIdx + 1}!`;
+    const introSpeech = generateQuestionSpeech(nextQ, personality, nextIdx, gameState.questions.length);
 
     setGameState((prev) => ({
       ...prev,
@@ -685,7 +737,7 @@ export default function App() {
     const shuffled = wrongIndices.sort(() => 0.5 - Math.random());
     const toEliminate = shuffled.slice(0, 2);
 
-    let banter = getRandomBanter('lifeline');
+    const banter = generateLifelineSmack(personality);
 
     setGameState((prev) => ({
       ...prev,
@@ -707,7 +759,8 @@ export default function App() {
     setIsLoadingLifeline(true);
 
     const currentQ = gameState.questions[gameState.currentIndex];
-    let hintText = getRandomBanter('lifeline');
+    const hintSmack = generateLifelineSmack(personality);
+    const hintText = `${hintSmack} Clue: ${currentQ.funFact || currentQ.explanation}`;
 
     setIsLoadingLifeline(false);
     setGameState((prev) => ({
@@ -812,6 +865,8 @@ export default function App() {
           onOpenGooglePlayExport={() => setIsGooglePlayExportOpen(true)}
           onRestartGame={() => {
             stopCurrentAudio();
+            localStorage.removeItem('snap_crackle_pop_active_game');
+            setSavedMatchAvailable(false);
             if (activeMode === 'multiplayer') {
               handleLeaveMultiplayer();
             } else {
@@ -825,6 +880,38 @@ export default function App() {
 
         {/* Main Arena Content */}
         <main className="min-h-[calc(100vh-80px)] sm:h-[calc(100vh-100px)] overflow-y-auto max-w-lg sm:max-w-3xl lg:max-w-5xl w-full mx-auto p-2 sm:p-4 lg:p-8 flex flex-col gap-4 sm:gap-6 relative z-10">
+          {/* Active Game Auto-Recovery Resume Banner */}
+          {savedMatchAvailable && gameState.status === 'setup' && (
+            <div className="bg-gradient-to-r from-purple-900/90 via-indigo-900/90 to-purple-900/90 border border-purple-400/50 rounded-2xl p-4 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-4 backdrop-blur-md animate-pulse">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-400/20 border border-amber-400/30 flex items-center justify-center text-xl shrink-0">
+                  ⚡
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-sm sm:text-base flex items-center gap-2">
+                    Unfinished Match Detected!
+                    <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold">Auto-Saved</span>
+                  </h3>
+                  <p className="text-xs text-purple-200/80">You have an in-progress round saved from your last session. Would you like to resume?</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  onClick={handleResumeSavedMatch}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 text-black font-extrabold text-xs sm:text-sm rounded-xl shadow-lg transition transform active:scale-95 cursor-pointer"
+                >
+                  Resume Match
+                </button>
+                <button
+                  onClick={handleDismissSavedMatch}
+                  className="px-3 py-2 bg-white/10 hover:bg-white/20 text-white/70 hover:text-white text-xs rounded-xl transition cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* MULTIPLAYER ARENA VIEW */}
           {activeMode === 'multiplayer' ? (
             <MultiplayerArena
@@ -866,6 +953,8 @@ export default function App() {
               }}
               onReturnHome={() => {
                 stopCurrentAudio();
+                localStorage.removeItem('snap_crackle_pop_active_game');
+                setSavedMatchAvailable(false);
                 refreshWallet();
                 setSelectedOption(null);
                 setHasAnswered(false);

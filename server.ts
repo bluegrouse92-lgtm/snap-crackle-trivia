@@ -192,6 +192,23 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&#x([0-9a-fA-F]+);/g, (_match, hex) => String.fromCharCode(parseInt(hex, 16)));
 }
 
+// Input Sanitization Utilities
+export function sanitizeString(input: unknown, maxLength = 64): string {
+  if (typeof input !== 'string') return '';
+  return input
+    .replace(/[<>'"&/\\;`]/g, '')
+    .trim()
+    .slice(0, maxLength);
+}
+
+export function sanitizeIdentifier(input: unknown, maxLength = 32): string {
+  if (typeof input !== 'string') return '';
+  return input
+    .replace(/[^a-zA-Z0-9_-]/g, '')
+    .trim()
+    .slice(0, maxLength);
+}
+
 // Category Mapping for Open Trivia Database
 const CATEGORY_MAP: Record<string, number> = {
   'science_nature': 17,
@@ -220,9 +237,13 @@ function getLocalQuestions(category: string, difficulty: string, count: number) 
 // 1. Generate Trivia Questions - Instant local serving from the 500-question weekly bank
 app.post('/api/generate-trivia', async (req, res) => {
   try {
-    const { category = 'all_mix', customTopic, difficulty = 'Medium', count = 5, personality } = req.body;
+    const category = sanitizeIdentifier(req.body.category, 32) || 'all_mix';
+    const customTopic = req.body.customTopic ? sanitizeString(req.body.customTopic, 100) : undefined;
+    const rawDiff = req.body.difficulty;
+    const difficulty = (rawDiff === 'Easy' || rawDiff === 'Hard' || rawDiff === 'All') ? rawDiff : 'Medium';
+    const count = req.body.count;
     const targetCount = Math.max(1, Math.min(Number(count) || 5, 50));
-    const hostVoiceName = personality?.name || 'Your Host';
+    const hostVoiceName = sanitizeString(req.body.personality?.name, 32) || 'Your Host';
 
     // Tier 1: Local Weekly Question Vault (500 Questions Bank)
     const weeklyQuestions = weeklyQuestionManager.getQuestions(category, difficulty, targetCount, hostVoiceName);
@@ -354,8 +375,10 @@ app.post('/api/host-tts', async (req, res) => {
 
 // 3. Dynamic Host Banter / Reaction to Game Events
 app.post('/api/host-banter', async (req, res) => {
-  const { eventType, personality, context } = req.body;
-  const hostName = personality?.name || 'The Host';
+  const eventType = sanitizeIdentifier(req.body.eventType, 32) || 'general';
+  const personality = req.body.personality;
+  const hostName = sanitizeString(personality?.name, 32) || 'The Host';
+  const context = req.body.context;
 
   if (!process.env.GEMINI_API_KEY) {
     return res.json({ text: personality?.catchphrase || 'On to the next round, contenders!' });
@@ -482,22 +505,29 @@ app.post('/api/leaderboard', (req, res) => {
       correctQuestions = 0,
     } = req.body;
 
-    if (!playerName || typeof score !== 'number') {
-      return res.status(400).json({ error: 'Invalid score payload' });
-    }
+    const cleanPlayerName = sanitizeString(playerName, 24) || 'Contender';
+    const cleanScore = Math.max(0, Math.min(10000000, Math.round(Number(score) || 0)));
+    const cleanAccuracy = Math.max(0, Math.min(100, Math.round(Number(accuracyPct) || 0)));
+    const cleanDifficulty = (difficulty === 'Easy' || difficulty === 'Hard') ? difficulty : 'Medium';
+    const cleanCategory = sanitizeIdentifier(category, 32) || 'all_mix';
+    const cleanHighestStreak = Math.max(0, Math.min(100, Math.round(Number(highestStreak) || 0)));
+    const cleanHostName = sanitizeString(hostName, 32) || 'The Host';
+    const cleanHostId = sanitizeIdentifier(hostId, 20) || 'roxy';
+    const cleanTotal = Math.max(1, Math.min(100, Math.round(Number(totalQuestions) || 5)));
+    const cleanCorrect = Math.max(0, Math.min(cleanTotal, Math.round(Number(correctQuestions) || 0)));
 
     const newEntry: StoredLeaderboardEntry = {
       id: `score_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
-      playerName: String(playerName).trim().slice(0, 24),
-      score: Math.max(0, Math.round(score)),
-      accuracyPct: Math.round(Number(accuracyPct) || 0),
-      difficulty: difficulty === 'Easy' ? 'Easy' : difficulty === 'Hard' ? 'Hard' : 'Medium',
-      category: String(category),
-      highestStreak: Number(highestStreak) || 0,
-      hostName: String(hostName),
-      hostId: String(hostId),
-      totalQuestions: Number(totalQuestions) || 5,
-      correctQuestions: Number(correctQuestions) || 0,
+      playerName: cleanPlayerName,
+      score: cleanScore,
+      accuracyPct: cleanAccuracy,
+      difficulty: cleanDifficulty,
+      category: cleanCategory,
+      highestStreak: cleanHighestStreak,
+      hostName: cleanHostName,
+      hostId: cleanHostId,
+      totalQuestions: cleanTotal,
+      correctQuestions: cleanCorrect,
       timestamp: new Date().toISOString(),
     };
 
