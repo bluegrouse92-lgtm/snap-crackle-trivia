@@ -1,4 +1,4 @@
-# Snap Crackle Pop Trivia! 💥⚡🍿
+# Snap Crackle Trivia! 💥⚡🍿
 
 
 > **The electrifying retro-modern arcade game-show trivia battle!** Featuring reactive AI hosts, high-stakes wagering, dynamic voice narration, a resilient 3-tier trivia engine, streak multipliers, and real-time multiplayer lobbies.
