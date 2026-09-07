@@ -38,7 +38,7 @@ interface HeaderProps {
   onToggleAutoPlay: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({
+export const Header: React.FC<HeaderProps> = React.memo(({
   personality,
   score,
   streak,
@@ -286,5 +286,5 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
     </header>
   );
-};
+});
 

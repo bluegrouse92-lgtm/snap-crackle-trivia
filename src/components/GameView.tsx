@@ -32,7 +32,7 @@ interface GameViewProps {
   onOpenLeaderboard: (id?: string) => void;
 }
 
-export const GameView: React.FC<GameViewProps> = ({
+export const GameView: React.FC<GameViewProps> = React.memo(({
   gameState,
   personality,
   onStartGame,
@@ -65,8 +65,9 @@ export const GameView: React.FC<GameViewProps> = ({
         mood={gameState.hostMood}
         speechText={gameState.hostSpeechText}
         isSpeaking={gameState.isHostSpeaking}
+        isLoadingVoice={isLoadingLifeline}
         onReplayVoice={onReplaySpeech}
-        onOpenLiveVoice={onOpenLiveVoice} // Should be passed in
+        onOpenLiveVoice={onOpenLiveVoice}
       />
 
       {gameState.status === 'setup' && (
@@ -116,4 +117,4 @@ export const GameView: React.FC<GameViewProps> = ({
       )}
     </>
   );
-};
+});

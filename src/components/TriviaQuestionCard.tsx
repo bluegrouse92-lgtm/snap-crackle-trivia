@@ -35,7 +35,7 @@ interface TriviaQuestionCardProps {
   scoreBreakdown?: ScoreBreakdown | null;
 }
 
-export const TriviaQuestionCard: React.FC<TriviaQuestionCardProps> = ({
+export const TriviaQuestionCard: React.FC<TriviaQuestionCardProps> = React.memo(({
   question,
   selectedOption,
   hasAnswered,
@@ -418,4 +418,4 @@ export const TriviaQuestionCard: React.FC<TriviaQuestionCardProps> = ({
       )}
     </div>
   );
-};
+});

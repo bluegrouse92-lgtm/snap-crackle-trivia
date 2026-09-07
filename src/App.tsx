@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense, lazy } from 'react';
 import {
   GameState,
   GameSettings,
   HostPersonality,
   HostMood,
   TriviaQuestion,
-  GroundingSource,
   ScoreBreakdown,
   MultiplayerRoomState,
 } from './types';
@@ -14,7 +13,6 @@ import {
   generateQuestionSpeech,
   generateSmackTalk,
   generateLifelineSmack,
-  generateGameIntro,
   generateGameOverSmack,
 } from './utils/hostBrain';
 import { Header } from './components/Header';
@@ -24,22 +22,24 @@ import { PersonalitySelector } from './components/PersonalitySelector';
 import { GameSetupModal } from './components/GameSetupModal';
 import { GameOverSummary } from './components/GameOverSummary';
 import { GameView } from './components/GameView';
-import { LiveVoiceModal } from './components/LiveVoiceModal';
 import { LeaderboardModal } from './components/LeaderboardModal';
 import { DailyBonusModal } from './components/DailyBonusModal';
-import { MultiplayerJoinModal } from './components/MultiplayerJoinModal';
-import { MultiplayerArena } from './components/MultiplayerArena';
-import { GooglePlayExportModal } from './components/GooglePlayExportModal';
-import { playPcmBase64, playSoundFX, stopCurrentAudio } from './utils/audioPlayer';
+import { useToast } from './components/Toast';
+import { playSoundFX, stopCurrentAudio } from './utils/audioPlayer';
 import {
   getCoinWallet,
   checkCanClaimDailyBonus,
   placeMatchBet,
-  claimDailyBonus,
 } from './utils/coinManager';
-import { Sparkles, AlertCircle, RefreshCw } from 'lucide-react';
+
+const LiveVoiceModal = lazy(() => import('./components/LiveVoiceModal').then((m) => ({ default: m.LiveVoiceModal })));
+const MultiplayerJoinModal = lazy(() => import('./components/MultiplayerJoinModal').then((m) => ({ default: m.MultiplayerJoinModal })));
+const MultiplayerArena = lazy(() => import('./components/MultiplayerArena').then((m) => ({ default: m.MultiplayerArena })));
+const GooglePlayExportModal = lazy(() => import('./components/GooglePlayExportModal').then((m) => ({ default: m.GooglePlayExportModal })));
 
 export default function App() {
+  const { showToast } = useToast();
+
   const [isAppLoading, setIsAppLoading] = useState(true);
   const [personality, setPersonality] = useState<HostPersonality>(PRESET_PERSONALITIES[0]);
   const [isPersonalityModalOpen, setIsPersonalityModalOpen] = useState(false);
@@ -53,17 +53,15 @@ export default function App() {
   const [isLoadingTrivia, setIsLoadingTrivia] = useState(false);
   const [isLoadingVoice, setIsLoadingVoice] = useState(false);
   const [isLoadingLifeline, setIsLoadingLifeline] = useState(false);
-  
-  // Mode and Coin Wallet state
+
   const [activeMode, setActiveMode] = useState<'single' | 'multiplayer'>('single');
   const [wallet, setWallet] = useState(getCoinWallet());
   const [canClaimDaily, setCanClaimDaily] = useState(checkCanClaimDailyBonus());
   const [lastGameSettings, setLastGameSettings] = useState<GameSettings | null>(null);
   const [savedMatchAvailable, setSavedMatchAvailable] = useState(false);
 
-  // Multiplayer State
   const [multiplayerRoomState, setMultiplayerRoomState] = useState<MultiplayerRoomState | null>(null);
-  const [myPlayerId, setMyPlayerId] = useState<string>(() => {
+  const [myPlayerId] = useState<string>(() => {
     let id = localStorage.getItem('trivia_player_id');
     if (!id) {
       id = 'user_' + Math.random().toString(36).substring(2, 9);
@@ -97,7 +95,7 @@ export default function App() {
     liveVoiceConnected: false,
   });
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [hasAnswered, setHasAnswered] = useState(false);
@@ -105,13 +103,33 @@ export default function App() {
   const [maxTime, setMaxTime] = useState(25);
   const [timeSpentOnCurrent, setTimeSpentOnCurrent] = useState(0);
   const [currentScoreBreakdown, setCurrentScoreBreakdown] = useState<ScoreBreakdown | null>(null);
-  
-  // Effects & Crash Recovery
+
+  // Ref mirror of hasAnswered to avoid stale closure in timer callback
+  const hasAnsweredRef = useRef(false);
   useEffect(() => {
-    // Loading timer
+    hasAnsweredRef.current = hasAnswered;
+  }, [hasAnswered]);
+
+  // Ref mirror of gameState for use inside timer/timeout handlers
+  const gameStateRef = useRef(gameState);
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
+
+  // Ref mirrors for values used inside async callbacks
+  const personalityRef = useRef(personality);
+  useEffect(() => {
+    personalityRef.current = personality;
+  }, [personality]);
+
+  const autoPlayVoiceRef = useRef(autoPlayVoice);
+  useEffect(() => {
+    autoPlayVoiceRef.current = autoPlayVoice;
+  }, [autoPlayVoice]);
+
+  useEffect(() => {
     const loadingTimer = setTimeout(() => setIsAppLoading(false), 2000);
 
-    // Check for saved in-progress match in local storage
     try {
       const saved = localStorage.getItem('snap_crackle_pop_active_game');
       if (saved) {
@@ -120,20 +138,21 @@ export default function App() {
           setSavedMatchAvailable(true);
         }
       }
-    } catch {}
-    
-    // Sync Coin Wallet & Auto-prompt daily bonus
+    } catch {
+      // ignore malformed saved game
+    }
+
     const w = getCoinWallet();
     setWallet(w);
     const eligible = checkCanClaimDailyBonus();
     setCanClaimDaily(eligible);
-    let bonusTimer: NodeJS.Timeout | undefined;
+    let bonusTimer: ReturnType<typeof setTimeout> | undefined;
     if (eligible) {
       bonusTimer = setTimeout(() => {
         setIsDailyBonusOpen(true);
       }, 1000);
     }
-    
+
     return () => {
       clearTimeout(loadingTimer);
       if (bonusTimer) clearTimeout(bonusTimer);
@@ -165,7 +184,6 @@ export default function App() {
         if (parsed?.gameState) {
           setGameState(parsed.gameState);
           if (parsed.lastGameSettings) {
-            setLastGameSettings(parsed.lastGameSettings);
             setMaxTime(parsed.lastGameSettings.timeLimit || 25);
             setTimeRemaining(parsed.lastGameSettings.timeLimit || 25);
           }
@@ -187,18 +205,16 @@ export default function App() {
     setSavedMatchAvailable(false);
   };
 
-  const refreshWallet = () => {
+  const refreshWallet = useCallback(() => {
     setWallet(getCoinWallet());
     setCanClaimDaily(checkCanClaimDailyBonus());
-  };
+  }, []);
 
   // -------------------------------------------------------------
   // MULTIPLAYER WEBSOCKET CONNECTION & AUTO-RECONNECT
   // -------------------------------------------------------------
-  // TODO(refactor): Extract multiplayer WebSocket state machine into a dedicated useMultiplayer custom hook
-  // TODO(a11y): Add ARIA live regions for screen readers during fast-paced countdown timers
-  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const connectMultiplayerWs = (onOpenCallback?: (ws: WebSocket) => void) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -214,12 +230,10 @@ export default function App() {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log('Multiplayer WS Connected');
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
-      // Start 20-second keepalive ping to prevent proxy/NAT dropouts
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
       heartbeatIntervalRef.current = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -235,7 +249,6 @@ export default function App() {
         const msg = JSON.parse(event.data);
         if (msg.type === 'room_state') {
           setMultiplayerRoomState(msg.state);
-          // Persist room credentials for seamless crash/refresh recovery
           if (msg.state?.roomCode) {
             localStorage.setItem('trivia_active_room_code', msg.state.roomCode);
           }
@@ -248,7 +261,7 @@ export default function App() {
         } else if (msg.type === 'heartbeat_pong') {
           // Heartbeat acknowledged
         } else if (msg.type === 'error') {
-          alert(`Multiplayer Notice: ${msg.message}`);
+          showToast(`Multiplayer Notice: ${msg.message}`, 'error');
         }
       } catch (err) {
         console.error('Error handling WS message:', err);
@@ -256,12 +269,10 @@ export default function App() {
     };
 
     ws.onclose = () => {
-      console.log('Multiplayer WS closed. Checking for auto-reconnect...');
       if (heartbeatIntervalRef.current) {
         clearInterval(heartbeatIntervalRef.current);
         heartbeatIntervalRef.current = null;
       }
-      // Auto-reconnect if match credentials are still stored
       const savedCode = localStorage.getItem('trivia_active_room_code');
       const savedId = localStorage.getItem('trivia_active_room_id');
       if (savedCode || savedId) {
@@ -283,22 +294,21 @@ export default function App() {
       }
     };
 
-    ws.onerror = (err) => {
-      console.error('Multiplayer WS error:', err);
+    ws.onerror = () => {
+      console.error('Multiplayer WS error');
     };
   };
 
-  const sendMultiplayerAction = (action: any) => {
+  const sendMultiplayerAction = useCallback((action: unknown) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(action));
     }
-  };
+  }, []);
 
   const handleCreateMultiplayerRoom = (settings: GameSettings, playerName: string) => {
-    // Check bet balance
     if (settings.betAmount && settings.betAmount > 0) {
       if (!placeMatchBet(settings.betAmount)) {
-        alert('Insufficient coin balance for this wager. Claim your daily bonus or choose a lower bet!');
+        showToast('Insufficient coin balance for this wager. Claim your daily bonus or choose a lower bet!', 'error');
         return;
       }
       refreshWallet();
@@ -332,7 +342,6 @@ export default function App() {
   };
 
   const handleQuickMatch = (playerName: string) => {
-    // Default 50 bet
     const bet = 50;
     if (wallet.balance >= bet) {
       placeMatchBet(bet);
@@ -354,7 +363,7 @@ export default function App() {
     handleCreateMultiplayerRoom(settings, playerName);
   };
 
-  const handleLeaveMultiplayer = () => {
+  const handleLeaveMultiplayer = useCallback(() => {
     localStorage.removeItem('trivia_active_room_code');
     localStorage.removeItem('trivia_active_room_id');
     if (reconnectTimeoutRef.current) {
@@ -369,10 +378,10 @@ export default function App() {
     setMultiplayerRoomState(null);
     setActiveMode('single');
     refreshWallet();
-  };
+  }, [sendMultiplayerAction, refreshWallet]);
 
-  // Fast Local Speech Synthesis Engine (Zero API latency, 100% offline)
-  const speakHostLine = async (text: string, voiceName?: string) => {
+  // Fast Local Speech Synthesis Engine
+  const speakHostLine = useCallback(async (text: string, voiceName?: string) => {
     if (!text) return;
     setIsLoadingVoice(false);
 
@@ -384,23 +393,23 @@ export default function App() {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       const voices = window.speechSynthesis.getVoices();
-      const voice = voices.find((v) => v.name.includes(voiceName || personality.voice)) || voices[0];
+      const voice = voices.find((v) => v.name.includes(voiceName || personalityRef.current.voice)) || voices[0];
       if (voice) utterance.voice = voice;
 
-      // Character-tuned pitch and rate
-      if (personality.id === 'sunny') {
+      const pid = personalityRef.current.id;
+      if (pid === 'sunny') {
         utterance.pitch = 1.25;
         utterance.rate = 1.1;
-      } else if (personality.id === 'roxy') {
+      } else if (pid === 'roxy') {
         utterance.pitch = 1.05;
         utterance.rate = 1.15;
-      } else if (personality.id === 'sterling') {
+      } else if (pid === 'sterling') {
         utterance.pitch = 0.9;
         utterance.rate = 0.95;
-      } else if (personality.id === 'unit74') {
+      } else if (pid === 'unit74') {
         utterance.pitch = 0.75;
         utterance.rate = 1.05;
-      } else if (personality.id === 'sage') {
+      } else if (pid === 'sage') {
         utterance.pitch = 0.95;
         utterance.rate = 0.9;
       }
@@ -425,17 +434,14 @@ export default function App() {
       setIsLoadingVoice(false);
       setGameState((prev) => ({ ...prev, isHostSpeaking: false }));
     }
-  };
-
+  }, []);
 
   // Start new match
-  const handleStartGame = async (settings: GameSettings) => {
-    console.log('App: handleStartGame called with:', settings);
+  const handleStartGame = useCallback(async (settings: GameSettings) => {
     try {
-      // Handle Coin Bet
       if (settings.betAmount && settings.betAmount > 0) {
         if (!placeMatchBet(settings.betAmount)) {
-          alert('Insufficient coin balance for this wager. Claim your daily bonus or choose a lower bet!');
+          showToast('Insufficient coin balance for this wager. Claim your daily bonus or choose a lower bet!', 'error');
           return;
         }
         refreshWallet();
@@ -448,8 +454,6 @@ export default function App() {
       setAutoPlayVoice(settings.autoPlayVoice);
       setCurrentScoreBreakdown(null);
 
-      // Call Search Grounded Trivia Generation API
-      console.log('App: Calling /api/generate-trivia');
       const res = await fetch('/api/generate-trivia', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -463,22 +467,11 @@ export default function App() {
       });
 
       if (!res.ok) {
-        const errorText = await res.text();
-        console.error('Trivia API error response:', errorText);
         throw new Error(`Failed to generate trivia questions: ${res.status} ${res.statusText}`);
       }
 
-      const dataText = await res.text();
-      console.log('App: Received response from /api/generate-trivia:', dataText);
-      let data;
-      try {
-        data = JSON.parse(dataText);
-      } catch (e) {
-        console.error('Trivia API returned invalid JSON:', dataText);
-        throw new Error('Trivia generator returned malformed data.');
-      }
+      const data = await res.json();
       const questions: TriviaQuestion[] = data.questions || [];
-      console.log('App: Parsed questions:', questions);
 
       if (questions.length === 0) {
         throw new Error('No questions received from generator');
@@ -525,53 +518,28 @@ export default function App() {
       if (settings.autoPlayVoice) {
         speakHostLine(initialSpeech, settings.personality.voice);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
       console.error('Game start error:', err);
       setIsLoadingTrivia(false);
-      alert(`Error starting game: ${err.message}. Please check the API.`);
+      showToast(`Error starting game: ${message}. Please check the API.`, 'error');
     }
-  };
+  }, [refreshWallet, showToast, speakHostLine]);
 
-  // Timer countdown loop
-  useEffect(() => {
-    if (gameState.status !== 'playing' || hasAnswered || maxTime === 0) {
-      if (timerRef.current) clearInterval(timerRef.current);
-      return;
-    }
-
-    timerRef.current = setInterval(() => {
-      setTimeRemaining((prev) => {
-        if (prev <= 1) {
-          if (timerRef.current) clearInterval(timerRef.current);
-          handleTimeOut();
-          return 0;
-        }
-        if (prev <= 6) {
-          playSoundFX('tick');
-        }
-        return prev - 1;
-      });
-      setTimeSpentOnCurrent((prev) => prev + 1);
-    }, 1000);
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [gameState.status, hasAnswered, maxTime]);
-
-  // Handle timeout (auto wrong answer)
-  const handleTimeOut = async () => {
-    if (hasAnswered) return;
+  // Handle timeout (auto wrong answer) — uses refs to avoid stale closure
+  const handleTimeOut = useCallback(() => {
+    if (hasAnsweredRef.current) return;
     setHasAnswered(true);
     setSelectedOption(-1);
 
     playSoundFX('wrong');
 
-    const currentQ = gameState.questions[gameState.currentIndex];
-    const isDoubleDown = gameState.lifelines.doubleDownActive;
+    const gs = gameStateRef.current;
+    const currentQ = gs.questions[gs.currentIndex];
+    const isDoubleDown = gs.lifelines.doubleDownActive;
 
     const penalty = isDoubleDown ? -500 : 0;
-    const nextScore = Math.max(0, gameState.score + penalty);
+    const nextScore = Math.max(0, gs.score + penalty);
 
     const breakdown: ScoreBreakdown = {
       basePoints: 0,
@@ -582,14 +550,13 @@ export default function App() {
     };
     setCurrentScoreBreakdown(breakdown);
 
-    // Dynamic contextual smack talk for timeout
     const reactionText = generateSmackTalk({
-      personality,
+      personality: personalityRef.current,
       isTimeout: true,
       isCorrect: false,
-      streak: gameState.streak,
-      highestStreak: gameState.highestStreak,
-      wager: gameState.currentWager || 0,
+      streak: gs.streak,
+      highestStreak: gs.highestStreak,
+      wager: gs.currentWager || 0,
       question: currentQ,
     }) + ` The correct answer was ${currentQ.correctAnswer}.`;
 
@@ -620,13 +587,40 @@ export default function App() {
       lifelines: { ...prev.lifelines, doubleDownActive: false },
     }));
 
-    if (autoPlayVoice) {
-      speakHostLine(reactionText, personality.voice);
+    if (autoPlayVoiceRef.current) {
+      speakHostLine(reactionText, personalityRef.current.voice);
     }
-  };
+  }, [maxTime, speakHostLine]);
+
+  // Timer countdown loop
+  useEffect(() => {
+    if (gameState.status !== 'playing' || hasAnswered || maxTime === 0) {
+      if (timerRef.current) clearInterval(timerRef.current);
+      return;
+    }
+
+    timerRef.current = setInterval(() => {
+      setTimeRemaining((prev) => {
+        if (prev <= 1) {
+          if (timerRef.current) clearInterval(timerRef.current);
+          handleTimeOut();
+          return 0;
+        }
+        if (prev <= 6) {
+          playSoundFX('tick');
+        }
+        return prev - 1;
+      });
+      setTimeSpentOnCurrent((prev) => prev + 1);
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [gameState.status, hasAnswered, maxTime, handleTimeOut]);
 
   // Select multiple choice answer
-  const handleSelectOption = async (optionIndex: number) => {
+  const handleSelectOption = useCallback(async (optionIndex: number) => {
     if (hasAnswered || gameState.status !== 'playing') return;
 
     if (timerRef.current) clearInterval(timerRef.current);
@@ -646,7 +640,6 @@ export default function App() {
       playSoundFX('correct');
       nextStreak = gameState.streak + 1;
 
-      // Base points based on chosen difficulty
       let basePoints = 1000;
       if (currentQ.difficulty === 'Hard' || currentQ.difficulty === 'Mind-Bender') {
         basePoints = 3000;
@@ -654,9 +647,7 @@ export default function App() {
         basePoints = 2000;
       }
 
-      // Speed bonus
       const speedBonus = maxTime > 0 ? Math.round((timeRemaining / maxTime) * 500) : 250;
-      // Streak Multiplier: +25% per streak level, capped at 2.5x (6+ streak)
       const streakMultiplier = Math.min(2.5, 1 + (nextStreak - 1) * 0.25);
       const doubleDownMultiplier = isDoubleDown ? 2 : 1;
 
@@ -690,7 +681,6 @@ export default function App() {
     const nextScore = Math.max(0, gameState.score + points);
     const nextHighest = Math.max(gameState.highestStreak, nextStreak);
 
-    // Call dynamic Host smack talk / praise engine
     const reactionText = generateSmackTalk({
       personality,
       isCorrect,
@@ -733,16 +723,14 @@ export default function App() {
     if (autoPlayVoice) {
       speakHostLine(reactionText, personality.voice);
     }
-  };
+  }, [gameState, maxTime, timeRemaining, timeSpentOnCurrent, personality, autoPlayVoice, speakHostLine]);
 
   // Next Question or End Game
-  const handleNextQuestion = async () => {
+  const handleNextQuestion = useCallback(async () => {
     stopCurrentAudio();
     const nextIdx = gameState.currentIndex + 1;
 
     if (nextIdx >= gameState.questions.length) {
-      console.log('App: Game Over condition met', { nextIdx, total: gameState.questions.length });
-      // Game Over
       playSoundFX('fanfare');
       const correctCount = gameState.answersHistory.filter((a) => a.isCorrect).length;
       const total = gameState.questions.length;
@@ -765,7 +753,6 @@ export default function App() {
       return;
     }
 
-    // Advance to next question
     const nextQ = gameState.questions[nextIdx];
     const introSpeech = generateQuestionSpeech(nextQ, personality, nextIdx, gameState.questions.length);
 
@@ -788,10 +775,10 @@ export default function App() {
     if (autoPlayVoice) {
       speakHostLine(introSpeech, personality.voice);
     }
-  };
+  }, [gameState, personality, autoPlayVoice, speakHostLine, refreshWallet, maxTime]);
 
   // Lifeline 1: 50/50 Eliminator
-  const handleUse5050 = async () => {
+  const handleUse5050 = useCallback(async () => {
     if (gameState.lifelines.fiftyFiftyUsed || hasAnswered) return;
     playSoundFX('lifeline');
 
@@ -813,10 +800,10 @@ export default function App() {
     if (autoPlayVoice) {
       speakHostLine(banter, personality.voice);
     }
-  };
+  }, [gameState, hasAnswered, personality, autoPlayVoice, speakHostLine]);
 
   // Lifeline 2: Ask Host for a Clue
-  const handleUseHint = async () => {
+  const handleUseHint = useCallback(async () => {
     if (gameState.lifelines.hintUsed || hasAnswered) return;
     playSoundFX('lifeline');
     setIsLoadingLifeline(true);
@@ -837,10 +824,10 @@ export default function App() {
     if (autoPlayVoice) {
       speakHostLine(hintText, personality.voice);
     }
-  };
+  }, [gameState, hasAnswered, personality, autoPlayVoice, speakHostLine]);
 
   // Lifeline 3: Google Search Grounding Deep-Dive
-  const handleUseSearchGrounding = async () => {
+  const handleUseSearchGrounding = useCallback(async () => {
     if (gameState.lifelines.searchUsed || hasAnswered) return;
     playSoundFX('lifeline');
     setIsLoadingLifeline(true);
@@ -873,11 +860,12 @@ export default function App() {
     } catch (err) {
       console.error('Search lifeline failed:', err);
       setIsLoadingLifeline(false);
+      showToast('Search lifeline failed. Please try again.', 'error');
     }
-  };
+  }, [gameState, hasAnswered, autoPlayVoice, speakHostLine, personality, showToast]);
 
   // Lifeline 4: Double Down
-  const handleToggleDoubleDown = () => {
+  const handleToggleDoubleDown = useCallback(() => {
     if (gameState.lifelines.doubleDownUsed || hasAnswered) return;
     playSoundFX('click');
     setGameState((prev) => ({
@@ -887,7 +875,73 @@ export default function App() {
         doubleDownActive: !prev.lifelines.doubleDownActive,
       },
     }));
-  };
+  }, [gameState.lifelines.doubleDownUsed, hasAnswered]);
+
+  const onPlayAgain = useCallback(() => {
+    stopCurrentAudio();
+    refreshWallet();
+    if (lastGameSettings) {
+      handleStartGame(lastGameSettings);
+    } else {
+      setGameState((prev) => ({ ...prev, status: 'setup' }));
+    }
+  }, [refreshWallet, lastGameSettings, handleStartGame]);
+
+  const onReturnHome = useCallback(() => {
+    stopCurrentAudio();
+    localStorage.removeItem('snap_crackle_pop_active_game');
+    setSavedMatchAvailable(false);
+    refreshWallet();
+    setSelectedOption(null);
+    setHasAnswered(false);
+    setCurrentScoreBreakdown(null);
+    setGameState((prev) => ({
+      ...prev,
+      status: 'setup',
+      currentIndex: 0,
+      score: 0,
+      streak: 0,
+      highestStreak: 0,
+      answersHistory: [],
+      eliminatedOptions: [],
+      currentHint: null,
+      currentSearchFact: null,
+      lifelines: {
+        fiftyFiftyUsed: false,
+        hintUsed: false,
+        searchUsed: false,
+        doubleDownActive: false,
+        doubleDownUsed: false,
+      },
+    }));
+  }, [refreshWallet]);
+
+  const onSelectNewHost = useCallback(() => {
+    stopCurrentAudio();
+    setIsPersonalityModalOpen(true);
+  }, []);
+
+  const onReplaySpeech = useCallback(() => {
+    speakHostLine(gameState.hostSpeechText, personality.voice);
+  }, [speakHostLine, gameState.hostSpeechText, personality.voice]);
+
+  const onOpenLeaderboard = useCallback((highlightId?: string) => {
+    setHighlightLeaderboardId(highlightId);
+    setIsLeaderboardOpen(true);
+  }, []);
+
+  const onRestartGame = useCallback(() => {
+    stopCurrentAudio();
+    localStorage.removeItem('snap_crackle_pop_active_game');
+    setSavedMatchAvailable(false);
+    if (activeMode === 'multiplayer') {
+      handleLeaveMultiplayer();
+    } else {
+      setGameState((prev) => ({ ...prev, status: 'setup' }));
+    }
+  }, [activeMode, handleLeaveMultiplayer]);
+
+  const onToggleAutoPlay = useCallback(() => setAutoPlayVoice((v) => !v), []);
 
   return (
     <>
@@ -898,7 +952,6 @@ export default function App() {
         </div>
       ) : (
         <div className="min-h-screen bg-[#0a0518] text-white flex flex-col selection:bg-purple-500 selection:text-white font-sans relative overflow-x-hidden">
-        {/* Frosted Glass Ambient Lighting Glows */}
         <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
           <div className="absolute top-[-10%] left-[-10%] w-[45%] h-[45%] bg-purple-600/25 rounded-full blur-[140px]" />
           <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-blue-600/20 rounded-full blur-[160px]" />
@@ -906,7 +959,6 @@ export default function App() {
           <div className="absolute bottom-[25%] left-[5%] w-[30%] h-[30%] bg-cyan-600/10 rounded-full blur-[130px]" />
         </div>
 
-        {/* Top Header */}
         <Header
           personality={personality}
           score={gameState.score}
@@ -926,24 +978,13 @@ export default function App() {
             setIsLeaderboardOpen(true);
           }}
           onOpenGooglePlayExport={() => setIsGooglePlayExportOpen(true)}
-          onRestartGame={() => {
-            stopCurrentAudio();
-            localStorage.removeItem('snap_crackle_pop_active_game');
-            setSavedMatchAvailable(false);
-            if (activeMode === 'multiplayer') {
-              handleLeaveMultiplayer();
-            } else {
-              setGameState((prev) => ({ ...prev, status: 'setup' }));
-            }
-          }}
+          onRestartGame={onRestartGame}
           liveVoiceConnected={gameState.liveVoiceConnected}
           autoPlayVoice={autoPlayVoice}
-          onToggleAutoPlay={() => setAutoPlayVoice(!autoPlayVoice)}
+          onToggleAutoPlay={onToggleAutoPlay}
         />
 
-        {/* Main Arena Content */}
         <main className="min-h-[calc(100vh-80px)] sm:h-[calc(100vh-100px)] overflow-y-auto max-w-lg sm:max-w-3xl lg:max-w-5xl w-full mx-auto p-2 sm:p-4 lg:p-8 flex flex-col gap-4 sm:gap-6 relative z-10">
-          {/* Active Game Auto-Recovery Resume Banner */}
           {savedMatchAvailable && gameState.status === 'setup' && (
             <div className="bg-gradient-to-r from-purple-900/90 via-indigo-900/90 to-purple-900/90 border border-purple-400/50 rounded-2xl p-4 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-4 backdrop-blur-md animate-pulse">
               <div className="flex items-center gap-3">
@@ -975,16 +1016,17 @@ export default function App() {
             </div>
           )}
 
-          {/* MULTIPLAYER ARENA VIEW */}
           {activeMode === 'multiplayer' ? (
-            <MultiplayerArena
-              roomState={multiplayerRoomState}
-              currentPlayerId={myPlayerId}
-              onSendAction={sendMultiplayerAction}
-              onLeaveRoom={handleLeaveMultiplayer}
-              personalities={PRESET_PERSONALITIES}
-              onOpenDailyBonus={() => setIsDailyBonusOpen(true)}
-            />
+            <Suspense fallback={<div className="flex items-center justify-center py-20"><div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" /></div>}>
+              <MultiplayerArena
+                roomState={multiplayerRoomState}
+                currentPlayerId={myPlayerId}
+                onSendAction={sendMultiplayerAction}
+                onLeaveRoom={handleLeaveMultiplayer}
+                personalities={PRESET_PERSONALITIES}
+                onOpenDailyBonus={() => setIsDailyBonusOpen(true)}
+              />
+            </Suspense>
           ) : (
             <GameView
               gameState={gameState}
@@ -1005,59 +1047,16 @@ export default function App() {
               timeRemaining={timeRemaining}
               maxTime={maxTime}
               scoreBreakdown={currentScoreBreakdown}
-              onPlayAgain={() => {
-                stopCurrentAudio();
-                refreshWallet();
-                if (lastGameSettings) {
-                  handleStartGame(lastGameSettings);
-                } else {
-                  setGameState((prev) => ({ ...prev, status: 'setup' }));
-                }
-              }}
-              onReturnHome={() => {
-                stopCurrentAudio();
-                localStorage.removeItem('snap_crackle_pop_active_game');
-                setSavedMatchAvailable(false);
-                refreshWallet();
-                setSelectedOption(null);
-                setHasAnswered(false);
-                setCurrentScoreBreakdown(null);
-                setGameState((prev) => ({
-                  ...prev,
-                  status: 'setup',
-                  currentIndex: 0,
-                  score: 0,
-                  streak: 0,
-                  highestStreak: 0,
-                  answersHistory: [],
-                  eliminatedOptions: [],
-                  currentHint: null,
-                  currentSearchFact: null,
-                  lifelines: {
-                    fiftyFiftyUsed: false,
-                    hintUsed: false,
-                    searchUsed: false,
-                    doubleDownActive: false,
-                    doubleDownUsed: false,
-                  },
-                }));
-              }}
-
-              onSelectNewHost={() => {
-                stopCurrentAudio();
-                setIsPersonalityModalOpen(true);
-              }}
-              onReplaySpeech={() => speakHostLine(gameState.hostSpeechText, personality.voice)}
+              onPlayAgain={onPlayAgain}
+              onReturnHome={onReturnHome}
+              onSelectNewHost={onSelectNewHost}
+              onReplaySpeech={onReplaySpeech}
               onOpenLiveVoice={() => setIsLiveVoiceModalOpen(true)}
-              onOpenLeaderboard={(highlightId) => {
-                setHighlightLeaderboardId(highlightId);
-                setIsLeaderboardOpen(true);
-              }}
+              onOpenLeaderboard={onOpenLeaderboard}
             />
           )}
         </main>
 
-        {/* Host Personality Selection & Custom Host Studio Modal */}
         {isPersonalityModalOpen && (
           <PersonalitySelector
             currentPersonality={personality}
@@ -1077,31 +1076,32 @@ export default function App() {
           />
         )}
 
-        {/* Daily 150 Login Bonus Modal */}
         <DailyBonusModal
           isOpen={isDailyBonusOpen}
           onClose={() => {
             setIsDailyBonusOpen(false);
             refreshWallet();
           }}
-          onClaimSuccess={() => refreshWallet()}
+          onCoinsClaimed={() => refreshWallet()}
         />
 
-        {/* Multiplayer Join & Matchmaking Modal */}
-        <MultiplayerJoinModal
-          isOpen={isMultiplayerModalOpen}
-          onClose={() => setIsMultiplayerModalOpen(false)}
-          onCreateRoom={handleCreateMultiplayerRoom}
-          onJoinRoom={handleJoinMultiplayerRoom}
-          onQuickMatch={handleQuickMatch}
-          personalities={PRESET_PERSONALITIES}
-          onOpenDailyBonus={() => {
-            setIsMultiplayerModalOpen(false);
-            setIsDailyBonusOpen(true);
-          }}
-        />
+        {isMultiplayerModalOpen && (
+          <Suspense fallback={null}>
+            <MultiplayerJoinModal
+              isOpen={isMultiplayerModalOpen}
+              onClose={() => setIsMultiplayerModalOpen(false)}
+              onCreateRoom={handleCreateMultiplayerRoom}
+              onJoinRoom={handleJoinMultiplayerRoom}
+              onQuickMatch={handleQuickMatch}
+              personalities={PRESET_PERSONALITIES}
+              onOpenDailyBonus={() => {
+                setIsMultiplayerModalOpen(false);
+                setIsDailyBonusOpen(true);
+              }}
+            />
+          </Suspense>
+        )}
 
-        {/* Hall of Fame Leaderboard Modal */}
         {isLeaderboardOpen && (
           <LeaderboardModal
             highlightEntryId={highlightLeaderboardId}
@@ -1109,23 +1109,29 @@ export default function App() {
           />
         )}
 
-        {/* Google Play Store Export & Packaging Modal */}
-        <GooglePlayExportModal
-          isOpen={isGooglePlayExportOpen}
-          onClose={() => setIsGooglePlayExportOpen(false)}
-        />
+        {isGooglePlayExportOpen && (
+          <Suspense fallback={null}>
+            <GooglePlayExportModal
+              isOpen={isGooglePlayExportOpen}
+              onClose={() => setIsGooglePlayExportOpen(false)}
+            />
+          </Suspense>
+        )}
 
-        {/* Gemini Live API Real-Time Voice Modal */}
-        <LiveVoiceModal
-          personality={personality}
-          currentQuestion={
-            gameState.status === 'playing' && gameState.questions[gameState.currentIndex]
-              ? gameState.questions[gameState.currentIndex]
-              : undefined
-          }
-          isOpen={isLiveVoiceModalOpen}
-          onClose={() => setIsLiveVoiceModalOpen(false)}
-        />
+        {isLiveVoiceModalOpen && (
+          <Suspense fallback={null}>
+            <LiveVoiceModal
+              personality={personality}
+              currentQuestion={
+                gameState.status === 'playing' && gameState.questions[gameState.currentIndex]
+                  ? gameState.questions[gameState.currentIndex]
+                  : undefined
+              }
+              isOpen={isLiveVoiceModalOpen}
+              onClose={() => setIsLiveVoiceModalOpen(false)}
+            />
+          </Suspense>
+        )}
       </div>
       )}
     </>

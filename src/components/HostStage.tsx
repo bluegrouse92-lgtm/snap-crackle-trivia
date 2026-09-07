@@ -23,7 +23,7 @@ interface HostStageProps {
   onOpenLiveVoice: () => void;
 }
 
-export const HostStage: React.FC<HostStageProps> = ({
+export const HostStage: React.FC<HostStageProps> = React.memo(({
   personality,
   mood,
   speechText,
@@ -169,4 +169,4 @@ export const HostStage: React.FC<HostStageProps> = ({
       </div>
     </div>
   );
-};
+});

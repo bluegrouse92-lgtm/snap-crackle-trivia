@@ -72,7 +72,6 @@ export const GameSetupModal: React.FC<GameSetupModalProps> = ({
 
   const handleStart = (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('GameSetupModal: Starting game...');
     onStartGame({
       personality,
       category: selectedCategory,
