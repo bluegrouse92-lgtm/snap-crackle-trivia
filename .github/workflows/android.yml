@@ -72,7 +72,7 @@ jobs:
       - name: Compile Installable Debug APK
         run: |
           cd android
-          chmod +x gradlew
+          chmod +x gradlew 
           ./gradlew assembleDebug --stacktrace
 
       - name: Upload Finished APK to GitHub
