@@ -16,7 +16,7 @@ jobs:
           node-version: 20
 
       - name: Install Project Dependencies
-        run: npm install
+        run: npm install --no-audit --no-fund
 
       - name: Build Web Production Files
         run: npm run build
@@ -29,8 +29,8 @@ jobs:
 
       - name: Inject Native Mobile Wrapper
         run: |
-          npm install @capacitor/core @capacitor/cli
-          npm install @capacitor/android
+          npm install @capacitor/core @capacitor/cli --no-audit --no-fund
+          npm install @capacitor/android --no-audit --no-fund
           npx cap init "Snap Crackle Trivia" "com.bluegrouse.trivia" --web-dir=dist
           npx cap add android
           npx cap sync android
@@ -55,24 +55,11 @@ jobs:
               }
           }
           EOF
-          echo "----- android/build.gradle (last 25 lines) -----"
-          tail -n 25 android/build.gradle
-
-      - name: Dump Dependency Info for Debugging
-        run: |
-          echo "===== android/build.gradle (full) ====="
-          cat android/build.gradle
-          echo ""
-          echo "===== Full dependency tree (grep kotlin-stdlib) ====="
-          cd android
-          chmod +x gradlew
-          ./gradlew :app:dependencies --configuration debugRuntimeClasspath > deps.txt 2>&1 || true
-          grep -i "kotlin-stdlib" deps.txt || echo "No kotlin-stdlib lines found"
 
       - name: Compile Installable Debug APK
         run: |
           cd android
-          chmod +x gradlew 
+          chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
 
       - name: Upload Finished APK to GitHub
