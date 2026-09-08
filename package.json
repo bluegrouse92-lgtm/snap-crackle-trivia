@@ -1,31 +1,15 @@
 {
   "name": "snap-crackle-trivia",
-  "version": "1.0.0",
-  "description": "Snap Crackle Pop Trivia! 💥⚡🍿 - High-energy arcade game-show trivia featuring reactive AI hosts, a local 500-question weekly bank refreshed via Google, voice narration, wagering, streak multipliers, and real-time multiplayer.",
-  "keywords": [
-    "trivia",
-    "game-show",
-    "gemini-api",
-    "react",
-    "typescript",
-    "tailwindcss",
-    "websockets",
-    "voice-synthesis",
-    "multiplayer",
-    "arcade-game"
-  ],
+  "version": "1.1.0",
+  "description": "Snap Crackle Trivia — offline-first arcade game-show trivia with local questions, browser voices, reactive hosts, wagering and multiplayer.",
+  "keywords": ["trivia", "game-show", "react", "typescript", "tailwindcss", "websockets", "voice-synthesis", "multiplayer", "arcade-game", "offline-first"],
   "author": "bluegrouse92-lgtm",
   "license": "MIT",
   "private": true,
   "type": "module",
   "homepage": "https://github.com/bluegrouse92-lgtm/snap-crackle-trivia#readme",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/bluegrouse92-lgtm/snap-crackle-trivia.git"
-  },
-  "bugs": {
-    "url": "https://github.com/bluegrouse92-lgtm/snap-crackle-trivia/issues"
-  },
+  "repository": { "type": "git", "url": "git+https://github.com/bluegrouse92-lgtm/snap-crackle-trivia.git" },
+  "bugs": { "url": "https://github.com/bluegrouse92-lgtm/snap-crackle-trivia/issues" },
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
@@ -35,7 +19,6 @@
     "update-questions": "tsx scripts/updateWeeklyQuestions.ts"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "canvas-confetti": "^1.9.4",
