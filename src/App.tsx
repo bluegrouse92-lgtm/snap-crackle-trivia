@@ -826,44 +826,6 @@ export default function App() {
     }
   }, [gameState, hasAnswered, personality, autoPlayVoice, speakHostLine]);
 
-  // Lifeline 3: Google Search Grounding Deep-Dive
-  const handleUseSearchGrounding = useCallback(async () => {
-    if (gameState.lifelines.searchUsed || hasAnswered) return;
-    playSoundFX('lifeline');
-    setIsLoadingLifeline(true);
-
-    const currentQ = gameState.questions[gameState.currentIndex];
-    try {
-      const res = await fetch('/api/lifeline-search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question: currentQ.question,
-          options: currentQ.options,
-          category: currentQ.category,
-        }),
-      });
-      const data = await res.json();
-      setIsLoadingLifeline(false);
-
-      setGameState((prev) => ({
-        ...prev,
-        currentSearchFact: { fact: data.fact, sources: data.sources || [] },
-        lifelines: { ...prev.lifelines, searchUsed: true },
-        hostSpeechText: `Google Search Grounding has retrieved live verified intel for you!`,
-        hostMood: 'excited',
-      }));
-
-      if (autoPlayVoice) {
-        speakHostLine(`Search Grounding retrieved verified intel! ${data.fact}`, personality.voice);
-      }
-    } catch (err) {
-      console.error('Search lifeline failed:', err);
-      setIsLoadingLifeline(false);
-      showToast('Search lifeline failed. Please try again.', 'error');
-    }
-  }, [gameState, hasAnswered, autoPlayVoice, speakHostLine, personality, showToast]);
-
   // Lifeline 4: Double Down
   const handleToggleDoubleDown = useCallback(() => {
     if (gameState.lifelines.doubleDownUsed || hasAnswered) return;
@@ -1041,8 +1003,8 @@ export default function App() {
               onNextQuestion={handleNextQuestion}
               onUse5050={handleUse5050}
               onUseHint={handleUseHint}
-              onUseSearchGrounding={handleUseSearchGrounding}
               onToggleDoubleDown={handleToggleDoubleDown}
+              isDoubleDownActive={gameState.lifelines.doubleDownActive}
               isLoadingLifeline={isLoadingLifeline}
               timeRemaining={timeRemaining}
               maxTime={maxTime}

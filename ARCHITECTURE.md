@@ -197,34 +197,22 @@ $$\text{PointsEarned} = \text{round}\Big( (P_{\text{base}} + \text{SpeedBonus}) 
 
 ---
 
-## 4. 3-Tier Question Generation Pipeline
+## 4. Question Generation Pipeline
 
-The server resolves questions through a cascading fallback strategy guaranteeing zero downtime:
+The server resolves questions through a completely offline vault strategy, guaranteeing zero downtime and requiring zero API credentials.
 
 ```
                       Client Request (/api/generate-trivia)
                                        │
                                        ▼
                    ┌───────────────────────────────────────┐
-                   │  Tier 1: Local Weekly Question Vault  │
-                   │  (500 Verified In-Memory Questions)   │
+                   │        Local Question Vault           │
+                   │  (Filtered by Category/Difficulty)    │
                    └───────────────────┬───────────────────┘
-                                       │ Empty / Custom Topic
+                                       │ Empty / Exhausted
                                        ▼
                    ┌───────────────────────────────────────┐
-                   │ Tier 2: Open Trivia Database (OTDB)   │
-                   │ (Public REST API + Entity Decoding)   │
-                   └───────────────────┬───────────────────┘
-                                       │ Network Failure / Offline
-                                       ▼
-                   ┌───────────────────────────────────────┐
-                   │  Tier 3: Gemini 2.5 Flash + Search    │
-                   │  (Cloud Generation & Grounding Facts) │
-                   └───────────────────┬───────────────────┘
-                                       │ Fallback
-                                       ▼
-                   ┌───────────────────────────────────────┐
-                   │   Offline Emergency Vault (trivia.ts) │
+                   │       Fallback General Mix            │
                    └───────────────────────────────────────┘
 ```
 
@@ -260,19 +248,10 @@ All WebSocket communication on `/ws/multiplayer` exchanges typed JSON frames:
 
 ---
 
-## 6. Technical Debt & Roadmap (`// TODO` Registry)
+## 6. Security & Stability Mechanisms
 
-Key architectural trade-offs and future enhancement opportunities marked throughout the codebase:
+The application employs several mechanisms to ensure a resilient offline experience:
 
-1. **Horizontal Scaling (`server/multiplayer.ts`)**:
-   - `// TODO(tech-debt)`: Migrate `activeRooms` from in-memory `Map` to Redis pub/sub to support multi-instance cluster deployments.
-2. **Database Persistence (`server.ts`)**:
-   - `// TODO(tech-debt)`: Migrate file-backed `data/leaderboard.json` to SQLite (embedded) or PostgreSQL (production) for transactional write safety.
-3. **Observability & Telemetry (`server.ts`)**:
-   - `// TODO(observability)`: Integrate OpenTelemetry / Sentry for automated tracing and performance monitoring.
-4. **Custom React Hook Refactor (`src/App.tsx`)**:
-   - `// TODO(refactor)`: Extract multiplayer WebSocket state and handlers into a dedicated `useMultiplayer()` custom hook.
-5. **Real-time Voice Streaming (`server/multiplayer.ts`)**:
-   - `// TODO(feature)`: Implement WebRTC data channels for low-latency peer-to-peer host voice broadcast.
-6. **Accessibility (`src/App.tsx`)**:
-   - `// TODO(a11y)`: Add ARIA live regions for screen readers during fast-paced countdown timers.
+1. **Memory Leak Prevention**: The backend features a periodic `setInterval` sweep that identifies and purges abandoned multiplayer rooms (where all players have disconnected or left), preventing RAM leaks.
+2. **File I/O Mutex Locks**: The file-backed leaderboard (`data/leaderboard.json`) uses a Promise-based queue lock (`leaderboardMutex`) to guarantee atomic writes. This prevents race-condition corruption if multiple sessions end simultaneously.
+3. **Graceful Disconnects**: If a player loses their connection, their WebSocket is marked disconnected but their session score is maintained. They have 60 seconds to reconnect and resume without data loss.

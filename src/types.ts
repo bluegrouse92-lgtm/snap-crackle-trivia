@@ -1,4 +1,4 @@
-export type HostVoiceName = 'Puck' | 'Charon' | 'Kore' | 'Fenrir' | 'Zephyr' | 'Aoede';
+export type HostVoiceName = 'Hazel' | 'Sonia' | 'Ryan' | 'George' | string;
 
 export type HostMood = 'welcoming' | 'thinking' | 'excited' | 'roasting' | 'dramatic' | 'praising' | 'facepalm';
 

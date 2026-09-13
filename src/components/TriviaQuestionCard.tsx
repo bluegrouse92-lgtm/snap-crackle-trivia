@@ -23,9 +23,8 @@ interface TriviaQuestionCardProps {
   lifelines: LifelineState;
   eliminatedOptions: number[];
   onUse5050: () => void;
-  onUseHint: () => void;
-  onUseSearchGrounding: () => void;
-  onToggleDoubleDown: () => void;
+  onUseHint?: () => void;
+  onToggleDoubleDown?: () => void;
   currentHint: string | null;
   searchFact: { fact: string; sources: GroundingSource[] } | null;
   isLoadingLifeline: boolean;
@@ -174,21 +173,6 @@ export const TriviaQuestionCard: React.FC<TriviaQuestionCardProps> = React.memo(
               <span>Ask Host Hint</span>
             </button>
 
-            {/* Google Search Grounding Deep-Dive */}
-            <button
-              id="lifeline-search-btn"
-              onClick={onUseSearchGrounding}
-              disabled={lifelines.searchUsed || isLoadingLifeline}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border backdrop-blur-md transition-all ${
-                lifelines.searchUsed
-                  ? 'bg-white/[0.02] text-white/30 border-white/5 cursor-not-allowed line-through'
-                  : 'bg-white/10 hover:bg-white/15 text-cyan-200 border-white/15 hover:border-cyan-400/60 shadow-sm'
-              }`}
-              title="Use Google Search to pull an up-to-date background fact"
-            >
-              <Search className="w-3.5 h-3.5" />
-              <span>Search Fact</span>
-            </button>
 
             {/* Double Down */}
             <button

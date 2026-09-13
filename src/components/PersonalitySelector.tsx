@@ -45,18 +45,7 @@ export const PersonalitySelector: React.FC<PersonalitySelectorProps> = ({
   const handleTestVoice = async (p: HostPersonality | { name: string; catchphrase: string; voice: HostVoiceName; id: string }) => {
     try {
       setTestingVoiceId(p.id);
-      const res = await fetch('/api/host-tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: `Greetings! I am ${p.name}. ${p.catchphrase}`,
-          voice: p.voice,
-        }),
-      });
-      const data = await res.json();
-      if (data.audio) {
-        await playPcmBase64(data.audio, 24000, () => setTestingVoiceId(null));
-      } else if ('speechSynthesis' in window) {
+      if ('speechSynthesis' in window) {
         window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(`Greetings! I am ${p.name}. ${p.catchphrase}`);
         if (p.id === 'sunny') {
